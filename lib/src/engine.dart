@@ -4,7 +4,16 @@ import 'dart:math';
 
 import 'package:http/http.dart' as http;
 
-// ================= MARKET DATA =================
+// =====================================================
+// AI TRADE PRO - ENGINE VERSION 0.2.0
+// Paper trading only - No real orders
+// =====================================================
+
+enum TradeMode { paper, live }
+
+enum SignalDirection { buy, sell, hold }
+
+// ==================== CANDLE ====================
 
 class Candle {
   final DateTime time;
@@ -22,8 +31,11 @@ class Candle {
   });
 }
 
+// ==================== MARKET DATA ====================
+
 class MarketDataException implements Exception {
   final String message;
+
   const MarketDataException(this.message);
 
   @override
@@ -31,7 +43,7 @@ class MarketDataException implements Exception {
 }
 
 class MarketDataService {
-  static const String _baseUrl = 'https://apiv2.nobitex.ir';
+  static const String baseUrl = 'https://apiv2.nobitex.ir';
 
   final http.Client _client;
 
@@ -44,12 +56,16 @@ class MarketDataService {
     int countback = 100,
   }) async {
     if (countback < 30 || countback > 500) {
-      throw const MarketDataException('تعداد کندل باید بین ۳۰ تا ۵۰۰ باشد.');
+      throw const MarketDataException(
+        'تعداد کندل باید بین ۳۰ تا ۵۰۰ باشد.',
+      );
     }
 
     final now = DateTime.now().millisecondsSinceEpoch ~/ 1000;
 
-    final uri = Uri.parse('$_baseUrl/market/udf/history').replace(
+    final uri = Uri.parse(
+      '$baseUrl/market/udf/history',
+    ).replace(
       queryParameters: {
         'symbol': symbol,
         'resolution': resolution,
@@ -60,92 +76,124 @@ class MarketDataService {
 
     try {
       final response = await _client
-          .get(uri, headers: {'Accept': 'application/json'})
+          .get(uri)
           .timeout(const Duration(seconds: 15));
 
       if (response.statusCode != 200) {
         throw MarketDataException(
-          'خطای دریافت بازار: HTTP ${response.statusCode}',
+          'خطای سرور: ${response.statusCode}',
         );
       }
 
-      final data = jsonDecode(response.body);
+      final dynamic decoded = jsonDecode(response.body);
 
-      if (data is! Map<String, dynamic> || data['s'] != 'ok') {
+      if (decoded is! Map) {
+        throw const MarketDataException(
+          'پاسخ نامعتبر از بازار دریافت شد.',
+        );
+      }
+
+      if (decoded['s'] != 'ok') {
         throw MarketDataException(
-          data is Map ? '${data['errmsg'] ?? 'داده بازار موجود نیست.'}' :
-              'پاسخ نامعتبر بازار.',
+          'اطلاعات بازار موجود نیست: ${decoded['errmsg'] ?? decoded['s']}',
         );
       }
 
-      final times = data['t'] as List?;
-      final highs = data['h'] as List?;
-      final lows = data['l'] as List?;
-      final closes = data['c'] as List?;
-      final volumes = data['v'] as List?;
+      final times = decoded['t'];
+      final highs = decoded['h'];
+      final lows = decoded['l'];
+      final closes = decoded['c'];
+      final volumes = decoded['v'];
 
-      if (times == null ||
-          highs == null ||
-          lows == null ||
-          closes == null ||
-          volumes == null) {
-        throw const MarketDataException('ساختار کندل‌ها ناقص است.');
+      if (times is! List ||
+          highs is! List ||
+          lows is! List ||
+          closes is! List ||
+          volumes is! List) {
+        throw const MarketDataException(
+          'ساختار اطلاعات کندل ناقص است.',
+        );
       }
 
-      final length = [
+      final lengths = [
         times.length,
         highs.length,
         lows.length,
         closes.length,
         volumes.length,
-      ].reduce(min);
+      ];
+
+      final length = lengths.reduce(
+        (a, b) => a < b ? a : b,
+      );
 
       if (length < 30) {
-        throw const MarketDataException('کمتر از ۳۰ کندل معتبر دریافت شد.');
+        throw const MarketDataException(
+          'تعداد کندل معتبر کافی نیست.',
+        );
       }
 
       final candles = <Candle>[];
 
       for (var i = 0; i < length; i++) {
-        final close = _number(closes[i]);
+        final timestamp = _number(times[i]);
         final high = _number(highs[i]);
         final low = _number(lows[i]);
+        final close = _number(closes[i]);
         final volume = _number(volumes[i]);
-        final timestamp = _number(times[i]);
 
-        if (close <= 0 || high <= 0 || low <= 0 ||
-            timestamp <= 0 || high < low) {
+        if (timestamp <= 0 ||
+            high <= 0 ||
+            low <= 0 ||
+            close <= 0 ||
+            high < low ||
+            close > high ||
+            close < low ||
+            !timestamp.isFinite ||
+            !high.isFinite ||
+            !low.isFinite ||
+            !close.isFinite ||
+            !volume.isFinite) {
           continue;
         }
 
-        candles.add(Candle(
-          time: DateTime.fromMillisecondsSinceEpoch(
-            timestamp.toInt() * 1000,
-            isUtc: true,
+        candles.add(
+          Candle(
+            time: DateTime.fromMillisecondsSinceEpoch(
+              timestamp.toInt() * 1000,
+              isUtc: true,
+            ),
+            close: close,
+            high: high,
+            low: low,
+            volume: max(0.0, volume),
           ),
-          close: close,
-          high: high,
-          low: low,
-          volume: max(0, volume),
-        ));
+        );
       }
+
+      candles.sort(
+        (a, b) => a.time.compareTo(b.time),
+      );
 
       if (candles.length < 30) {
-        throw const MarketDataException('کندل معتبر کافی دریافت نشد.');
+        throw const MarketDataException(
+          'کندل معتبر کافی دریافت نشد.',
+        );
       }
 
-      candles.sort((a, b) => a.time.compareTo(b.time));
       return candles;
     } on MarketDataException {
       rethrow;
     } catch (e) {
-      throw MarketDataException('دریافت اطلاعات بازار ناموفق بود: $e');
+      throw MarketDataException(
+        'خطا در دریافت اطلاعات بازار: $e',
+      );
     }
   }
 
   double _number(dynamic value) {
     if (value is num) return value.toDouble();
-    return double.tryParse('$value') ?? 0;
+    return double.tryParse('$value') ?? 0.0;
   }
 
   void dispose() {
@@ -153,10 +201,7 @@ class MarketDataService {
   }
 }
 
-// ================= SIGNAL ENGINE =================
-
-enum TradeMode { paper, live }
-enum SignalDirection { buy, sell, hold }
+// ==================== SIGNAL RESULT ====================
 
 class SignalResult {
   final SignalDirection direction;
@@ -170,23 +215,29 @@ class SignalResult {
   });
 }
 
+// ==================== SIGNAL ENGINE ====================
+
 class SignalEngine {
   SignalResult analyze(List<Candle> candles) {
     if (candles.length < 30) {
       return const SignalResult(
         direction: SignalDirection.hold,
         confidence: 0,
-        reasons: ['حداقل ۳۰ کندل برای تحلیل لازم است.'],
+        reasons: [
+          'برای تحلیل حداقل ۳۰ کندل لازم است.',
+        ],
       );
     }
 
     final closes = candles.map((c) => c.close).toList();
 
-    if (closes.any((price) => !price.isFinite || price <= 0)) {
+    if (closes.any(
+      (v) => !v.isFinite || v <= 0,
+    )) {
       return const SignalResult(
         direction: SignalDirection.hold,
         confidence: 0,
-        reasons: ['داده قیمت نامعتبر است.'],
+        reasons: ['اطلاعات قیمت نامعتبر است.'],
       );
     }
 
@@ -196,28 +247,35 @@ class SignalEngine {
 
     final macdValues = _macd(closes);
     final macd = macdValues.last;
-    final previousMacd = macdValues[macdValues.length - 2];
+    final previousMacd =
+        macdValues[macdValues.length - 2];
 
     var score = 0;
     final reasons = <String>[];
 
+    // EMA TREND
+
     if (ema9 > ema21) {
       score += 2;
-      reasons.add('EMA 9 بالاتر از EMA 21 است.');
+      reasons.add('روند EMA صعودی است.');
     } else {
       score -= 2;
-      reasons.add('EMA 9 پایین‌تر از EMA 21 است.');
+      reasons.add('روند EMA نزولی است.');
     }
+
+    // RSI MOMENTUM
 
     if (rsi >= 52 && rsi <= 68) {
       score++;
-      reasons.add('RSI نشان‌دهنده مومنتوم مثبت است.');
+      reasons.add('RSI مومنتوم مثبت دارد.');
     } else if (rsi <= 45) {
       score--;
-      reasons.add('RSI نشان‌دهنده ضعف مومنتوم است.');
+      reasons.add('RSI ضعف مومنتوم را نشان می‌دهد.');
     } else {
       reasons.add('RSI سیگنال مشخصی ندارد.');
     }
+
+    // MACD
 
     if (macd > 0 && macd > previousMacd) {
       score++;
@@ -233,16 +291,27 @@ class SignalEngine {
             ? SignalDirection.sell
             : SignalDirection.hold;
 
+    final confidence = min(
+      95,
+      (score.abs() / 4 * 100).round(),
+    );
+
     return SignalResult(
       direction: direction,
-      confidence: min(95, (score.abs() / 4 * 100).round()),
+      confidence: confidence.toInt(),
       reasons: reasons,
     );
   }
 
   double _ema(List<double> values, int period) {
-    final k = 2 / (period + 1);
-    var result = values.take(period).reduce((a, b) => a + b) / period;
+    if (values.length < period) return 0.0;
+
+    final k = 2.0 / (period + 1);
+
+    var result = values
+            .take(period)
+            .reduce((a, b) => a + b) /
+        period;
 
     for (final value in values.skip(period)) {
       result = value * k + result * (1 - k);
@@ -252,13 +321,14 @@ class SignalEngine {
   }
 
   double _rsi(List<double> values, int period) {
-    if (values.length <= period) return 50;
+    if (values.length <= period) return 50.0;
 
     var gains = 0.0;
     var losses = 0.0;
 
     for (var i = 1; i <= period; i++) {
       final change = values[i] - values[i - 1];
+
       if (change > 0) {
         gains += change;
       } else {
@@ -272,31 +342,41 @@ class SignalEngine {
     for (var i = period + 1; i < values.length; i++) {
       final change = values[i] - values[i - 1];
 
-      averageGain =
-          (averageGain * (period - 1) + max(0, change)) / period;
+      averageGain = (
+        averageGain * (period - 1) +
+        (change > 0 ? change : 0.0)
+      ) / period;
 
-      averageLoss =
-          (averageLoss * (period - 1) + max(0, -change)) / period;
+      averageLoss = (
+        averageLoss * (period - 1) +
+        (change < 0 ? -change : 0.0)
+      ) / period;
     }
 
-    if (averageLoss == 0) return 100;
+    if (averageLoss == 0) return 100.0;
+
     final rs = averageGain / averageLoss;
-    return 100 - (100 / (1 + rs));
+
+    return 100.0 - (100.0 / (1.0 + rs));
   }
 
   List<double> _macd(List<double> values) {
     final result = <double>[];
 
-    for (var i = 27; i < values.length; i++) {
+    for (var i = 26; i < values.length; i++) {
       final sample = values.sublist(0, i + 1);
-      result.add(_ema(sample, 12) - _ema(sample, 26));
+
+      final fast = _ema(sample, 12);
+      final slow = _ema(sample, 26);
+
+      result.add(fast - slow);
     }
 
     return result;
   }
 }
 
-// ================= RISK MANAGEMENT =================
+// ==================== RISK MANAGER ====================
 
 class RiskManager {
   const RiskManager({
@@ -314,16 +394,22 @@ class RiskManager {
     required double entry,
     required double stop,
   }) {
-    if (equity <= 0 || entry <= 0 || stop <= 0 || entry == stop) {
-      return 0;
+    if (equity <= 0 ||
+        entry <= 0 ||
+        stop <= 0 ||
+        entry == stop) {
+      return 0.0;
     }
 
     final riskAmount = equity * riskPerTrade;
     final riskFraction = (entry - stop).abs() / entry;
 
-    if (riskFraction <= 0) return 0;
+    if (riskFraction <= 0) return 0.0;
 
-    return min(equity, riskAmount / riskFraction);
+    return min(
+      equity,
+      riskAmount / riskFraction,
+    ).toDouble();
   }
 
   bool dailyLossLimitReached({
@@ -332,8 +418,10 @@ class RiskManager {
   }) {
     if (startingEquity <= 0) return true;
 
-    return (startingEquity - currentEquity) / startingEquity
-        >= maxDailyLoss;
+    final loss =
+        (startingEquity - currentEquity) / startingEquity;
+
+    return loss >= maxDailyLoss;
   }
 
   bool drawdownLimitReached({
@@ -342,12 +430,14 @@ class RiskManager {
   }) {
     if (initialEquity <= 0) return true;
 
-    return (initialEquity - currentEquity) / initialEquity
-        >= maxDrawdown;
+    final loss =
+        (initialEquity - currentEquity) / initialEquity;
+
+    return loss >= maxDrawdown;
   }
 }
 
-// ================= PAPER PORTFOLIO =================
+// ==================== PAPER POSITION ====================
 
 class PaperPosition {
   final String symbol;
@@ -360,14 +450,20 @@ class PaperPosition {
     required this.averageCost,
   });
 
-  double marketValue(double price) => quantity * price;
-  double unrealizedPnl(double price) =>
-      (price - averageCost) * quantity;
+  double marketValue(double price) {
+    return quantity * price;
+  }
+
+  double unrealizedPnl(double price) {
+    return (price - averageCost) * quantity;
+  }
 }
+
+// ==================== PAPER PORTFOLIO ====================
 
 class PaperPortfolio {
   PaperPortfolio({
-    this.initialUsdt = 50,
+    this.initialUsdt = 50.0,
     this.feeRate = 0.001,
   }) : _cash = initialUsdt;
 
@@ -375,21 +471,28 @@ class PaperPortfolio {
   final double feeRate;
 
   double _cash;
-  double _realizedPnl = 0;
+  double _realizedPnl = 0.0;
 
   final List<PaperFill> _fills = [];
+
   final Map<String, PaperPosition> _positions = {};
 
   double get cash => _cash;
+
   double get realizedPnl => _realizedPnl;
 
-  List<PaperFill> get fills => List.unmodifiable(_fills);
+  List<PaperFill> get fills =>
+      List.unmodifiable(_fills);
 
   Map<String, PaperPosition> get positions =>
       Map.unmodifiable(_positions);
 
-  double get totalFees =>
-      _fills.fold(0, (sum, fill) => sum + fill.fee);
+  double get totalFees {
+    return _fills.fold(
+      0.0,
+      (sum, fill) => sum + fill.fee,
+    );
+  }
 
   double equity(Map<String, double> prices) {
     var result = _cash;
@@ -397,9 +500,13 @@ class PaperPortfolio {
     for (final entry in _positions.entries) {
       final price = prices[entry.key];
 
-      if (price != null && price > 0) {
-        result += entry.value.marketValue(price);
+      if (price == null ||
+          !price.isFinite ||
+          price <= 0) {
+        return double.nan;
       }
+
+      result += entry.value.marketValue(price);
     }
 
     return result;
@@ -411,21 +518,30 @@ class PaperPortfolio {
     for (final entry in _positions.entries) {
       final price = prices[entry.key];
 
-      if (price != null && price > 0) {
-        result += entry.value.unrealizedPnl(price);
+      if (price == null ||
+          !price.isFinite ||
+          price <= 0) {
+        return double.nan;
       }
+
+      result += entry.value.unrealizedPnl(price);
     }
 
     return result;
   }
+
+  // BUY
 
   bool buy({
     required String symbol,
     required double price,
     required double quantity,
   }) {
-    if (!price.isFinite || !quantity.isFinite ||
-        price <= 0 || quantity <= 0) {
+    if (symbol.isEmpty ||
+        !price.isFinite ||
+        !quantity.isFinite ||
+        price <= 0 ||
+        quantity <= 0) {
       return false;
     }
 
@@ -433,13 +549,19 @@ class PaperPortfolio {
     final fee = cost * feeRate;
     final total = cost + fee;
 
-    if (total > _cash) return false;
+    if (!total.isFinite || total > _cash) {
+      return false;
+    }
 
     final old = _positions[symbol];
-    final oldQuantity = old?.quantity ?? 0;
-    final oldCost = oldQuantity * (old?.averageCost ?? 0);
+
+    final oldQuantity = old?.quantity ?? 0.0;
+
+    final oldCost =
+        oldQuantity * (old?.averageCost ?? 0.0);
 
     final newQuantity = oldQuantity + quantity;
+
     final newAverageCost =
         (oldCost + total) / newQuantity;
 
@@ -451,32 +573,40 @@ class PaperPortfolio {
       averageCost: newAverageCost,
     );
 
-    _fills.add(PaperFill(
-      symbol: symbol,
-      side: 'BUY',
-      price: price,
-      quantity: quantity,
-      fee: fee,
-      realizedPnl: 0,
-      time: DateTime.now(),
-    ));
+    _fills.add(
+      PaperFill(
+        symbol: symbol,
+        side: 'BUY',
+        price: price,
+        quantity: quantity,
+        fee: fee,
+        realizedPnl: 0.0,
+        time: DateTime.now(),
+      ),
+    );
 
     return true;
   }
+
+  // SELL
 
   bool sell({
     required String symbol,
     required double price,
     required double quantity,
   }) {
-    if (!price.isFinite || !quantity.isFinite ||
-        price <= 0 || quantity <= 0) {
+    if (symbol.isEmpty ||
+        !price.isFinite ||
+        !quantity.isFinite ||
+        price <= 0 ||
+        quantity <= 0) {
       return false;
     }
 
     final position = _positions[symbol];
 
-    if (position == null || quantity > position.quantity) {
+    if (position == null ||
+        quantity > position.quantity) {
       return false;
     }
 
@@ -484,12 +614,18 @@ class PaperPortfolio {
     final fee = gross * feeRate;
     final proceeds = gross - fee;
 
-    final pnl = proceeds - position.averageCost * quantity;
+    if (!proceeds.isFinite || proceeds <= 0) {
+      return false;
+    }
+
+    final pnl =
+        proceeds - position.averageCost * quantity;
 
     _cash += proceeds;
     _realizedPnl += pnl;
 
-    final remaining = position.quantity - quantity;
+    final remaining =
+        position.quantity - quantity;
 
     if (remaining <= 0.000000000001) {
       _positions.remove(symbol);
@@ -501,19 +637,23 @@ class PaperPortfolio {
       );
     }
 
-    _fills.add(PaperFill(
-      symbol: symbol,
-      side: 'SELL',
-      price: price,
-      quantity: quantity,
-      fee: fee,
-      realizedPnl: pnl,
-      time: DateTime.now(),
-    ));
+    _fills.add(
+      PaperFill(
+        symbol: symbol,
+        side: 'SELL',
+        price: price,
+        quantity: quantity,
+        fee: fee,
+        realizedPnl: pnl,
+        time: DateTime.now(),
+      ),
+    );
 
     return true;
   }
 }
+
+// ==================== PAPER FILL ====================
 
 class PaperFill {
   const PaperFill({
