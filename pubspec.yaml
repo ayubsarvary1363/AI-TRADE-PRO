@@ -1,7 +1,8 @@
+
 name: ai_trade_pro
-description: Mobile-first crypto trading assistant with on-device paper trading foundation.
+description: AI Trade Pro - Automated Paper Trading
 publish_to: 'none'
-version: 0.1.0+1
+version: 0.2.0+2
 
 environment:
   sdk: '>=3.3.0 <4.0.0'
@@ -9,6 +10,8 @@ environment:
 dependencies:
   flutter:
     sdk: flutter
+  http: ^1.2.2
+  shared_preferences: ^2.3.2
 
 dev_dependencies:
   flutter_test:
