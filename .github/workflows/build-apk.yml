@@ -30,6 +30,27 @@ jobs:
       - name: Create Android project files
         run: flutter create --project-name ai_trade_pro --platforms=android .
 
+      - name: Add Android Internet Permission
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          manifest = Path("android/app/src/main/AndroidManifest.xml")
+          content = manifest.read_text(encoding="utf-8")
+
+          permission = '    <uses-permission android:name="android.permission.INTERNET" />'
+
+          if 'android.permission.INTERNET' not in content:
+              content = content.replace(
+                  '<application',
+                  permission + '\n    <application',
+                  1
+              )
+              manifest.write_text(content, encoding="utf-8")
+
+          print("Internet permission verified.")
+          PY
+
       - name: Get dependencies
         run: flutter pub get
 
