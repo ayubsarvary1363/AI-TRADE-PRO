@@ -14,7 +14,7 @@ class AiTradeProApp extends StatelessWidget {
         useMaterial3: true,
         colorScheme: ColorScheme.fromSeed(seedColor: seed, brightness: Brightness.dark),
         scaffoldBackgroundColor: const Color(0xFF0B1220),
-        cardTheme: CardThemeData(
+        cardTheme: CardTheme(
           color: const Color(0xFF121D2E),
           elevation: 0,
           shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
