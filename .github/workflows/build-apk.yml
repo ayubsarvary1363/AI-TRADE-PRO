@@ -7,54 +7,29 @@ on:
     branches:
       - main
 
+permissions:
+  contents: read
+
 jobs:
   build:
+    name: Build Android APK
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout project
+      - name: Checkout source
         uses: actions/checkout@v4
-
-      - name: Setup Java
-        uses: actions/setup-java@v4
-        with:
-          distribution: temurin
-          java-version: '17'
 
       - name: Setup Flutter
         uses: subosito/flutter-action@v2
         with:
           flutter-version: '3.24.5'
           channel: stable
+          cache: true
 
-      - name: Create Android project files
-        run: flutter create --project-name ai_trade_pro --platforms=android .
-
-      - name: Add Android Internet Permission
-        run: |
-          python3 - <<'PY'
-          from pathlib import Path
-
-          manifest = Path("android/app/src/main/AndroidManifest.xml")
-          content = manifest.read_text(encoding="utf-8")
-
-          permission = '    <uses-permission android:name="android.permission.INTERNET" />'
-
-          if 'android.permission.INTERNET' not in content:
-              content = content.replace(
-                  '<application',
-                  permission + '\n    <application',
-                  1
-              )
-              manifest.write_text(content, encoding="utf-8")
-
-          print("Internet permission verified.")
-          PY
-
-      - name: Get dependencies
+      - name: Install dependencies
         run: flutter pub get
 
-      - name: Build APK
+      - name: Build release APK
         run: flutter build apk --release
 
       - name: Upload APK
