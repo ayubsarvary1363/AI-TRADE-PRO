@@ -5,12 +5,11 @@ import 'dart:math';
 import 'package:http/http.dart' as http;
 
 // =====================================================
-// AI TRADE PRO - ENGINE VERSION 0.3.0
+// AI TRADE PRO - ENGINE VERSION 0.4.0
 // Paper trading only - No real orders
 // =====================================================
 
 enum TradeMode { paper, live }
-
 enum SignalDirection { buy, sell, hold }
 
 // ==================== CANDLE ====================
@@ -35,7 +34,6 @@ class Candle {
 
 class MarketDataException implements Exception {
   final String message;
-
   const MarketDataException(this.message);
 
   @override
@@ -152,9 +150,7 @@ class MarketDataService {
       final candles = <Candle>[];
 
       for (final item in decoded) {
-        if (item is! List || item.length < 6) {
-          continue;
-        }
+        if (item is! List || item.length < 6) continue;
 
         final timestamp = _number(item[0]);
         final high = _number(item[2]);
@@ -162,18 +158,18 @@ class MarketDataService {
         final close = _number(item[4]);
         final volume = _number(item[5]);
 
-        if (timestamp <= 0 ||
+        if (!timestamp.isFinite ||
+            !high.isFinite ||
+            !low.isFinite ||
+            !close.isFinite ||
+            !volume.isFinite ||
+            timestamp <= 0 ||
             high <= 0 ||
             low <= 0 ||
             close <= 0 ||
             high < low ||
             close > high ||
-            close < low ||
-            !timestamp.isFinite ||
-            !high.isFinite ||
-            !low.isFinite ||
-            !close.isFinite ||
-            !volume.isFinite) {
+            close < low) {
           continue;
         }
 
@@ -279,18 +275,18 @@ class MarketDataService {
         final close = _number(closes[i]);
         final volume = _number(volumes[i]);
 
-        if (timestamp <= 0 ||
+        if (!timestamp.isFinite ||
+            !high.isFinite ||
+            !low.isFinite ||
+            !close.isFinite ||
+            !volume.isFinite ||
+            timestamp <= 0 ||
             high <= 0 ||
             low <= 0 ||
             close <= 0 ||
             high < low ||
             close > high ||
-            close < low ||
-            !timestamp.isFinite ||
-            !high.isFinite ||
-            !low.isFinite ||
-            !close.isFinite ||
-            !volume.isFinite) {
+            close < low) {
           continue;
         }
 
@@ -440,7 +436,8 @@ class SignalEngine {
 
     final k = 2.0 / (period + 1);
 
-    var result = values.take(period).reduce((a, b) => a + b) / period;
+    var result =
+        values.take(period).reduce((a, b) => a + b) / period;
 
     for (final value in values.skip(period)) {
       result = value * k + result * (1 - k);
@@ -471,15 +468,15 @@ class SignalEngine {
     for (var i = period + 1; i < values.length; i++) {
       final change = values[i] - values[i - 1];
 
-      averageGain = (
-        averageGain * (period - 1) +
-        (change > 0 ? change : 0.0)
-      ) / period;
+      averageGain =
+          (averageGain * (period - 1) +
+                  (change > 0 ? change : 0.0)) /
+              period;
 
-      averageLoss = (
-        averageLoss * (period - 1) +
-        (change < 0 ? -change : 0.0)
-      ) / period;
+      averageLoss =
+          (averageLoss * (period - 1) +
+                  (change < 0 ? -change : 0.0)) /
+              period;
     }
 
     if (averageLoss == 0) return 100.0;
@@ -518,7 +515,10 @@ class RiskManager {
     required double entry,
     required double stop,
   }) {
-    if (equity <= 0 ||
+    if (!equity.isFinite ||
+        !entry.isFinite ||
+        !stop.isFinite ||
+        equity <= 0 ||
         entry <= 0 ||
         stop <= 0 ||
         entry == stop) {
@@ -540,9 +540,15 @@ class RiskManager {
     required double startingEquity,
     required double currentEquity,
   }) {
-    if (startingEquity <= 0) return true;
+    if (!startingEquity.isFinite ||
+        !currentEquity.isFinite ||
+        startingEquity <= 0) {
+      return true;
+    }
 
-    final loss = (startingEquity - currentEquity) / startingEquity;
+    final loss =
+        (startingEquity - currentEquity) / startingEquity;
+
     return loss >= maxDailyLoss;
   }
 
@@ -550,9 +556,15 @@ class RiskManager {
     required double initialEquity,
     required double currentEquity,
   }) {
-    if (initialEquity <= 0) return true;
+    if (!initialEquity.isFinite ||
+        !currentEquity.isFinite ||
+        initialEquity <= 0) {
+      return true;
+    }
 
-    final loss = (initialEquity - currentEquity) / initialEquity;
+    final loss =
+        (initialEquity - currentEquity) / initialEquity;
+
     return loss >= maxDrawdown;
   }
 }
@@ -582,19 +594,24 @@ class PaperPortfolio {
   PaperPortfolio({
     this.initialUsdt = 50.0,
     this.feeRate = 0.001,
-  }) : _cash = initialUsdt;
+  })  : _cash = initialUsdt,
+        _peakEquity = initialUsdt;
 
   final double initialUsdt;
   final double feeRate;
 
   double _cash;
   double _realizedPnl = 0.0;
+  double _peakEquity;
+  double _maximumDrawdown = 0.0;
 
   final List<PaperFill> _fills = [];
   final Map<String, PaperPosition> _positions = {};
 
   double get cash => _cash;
   double get realizedPnl => _realizedPnl;
+  double get peakEquity => _peakEquity;
+  double get maximumDrawdown => _maximumDrawdown;
 
   List<PaperFill> get fills => List.unmodifiable(_fills);
 
@@ -617,6 +634,20 @@ class PaperPortfolio {
       }
 
       result += entry.value.marketValue(price);
+    }
+
+    if (!result.isFinite) return double.nan;
+
+    if (result > _peakEquity) {
+      _peakEquity = result;
+    }
+
+    if (_peakEquity > 0) {
+      final drawdown = (_peakEquity - result) / _peakEquity;
+
+      if (drawdown > _maximumDrawdown) {
+        _maximumDrawdown = drawdown;
+      }
     }
 
     return result;
@@ -643,11 +674,13 @@ class PaperPortfolio {
     required double price,
     required double quantity,
   }) {
-    if (symbol.isEmpty ||
+    if (symbol.trim().isEmpty ||
         !price.isFinite ||
         !quantity.isFinite ||
         price <= 0 ||
-        quantity <= 0) {
+        quantity <= 0 ||
+        !feeRate.isFinite ||
+        feeRate < 0) {
       return false;
     }
 
@@ -661,6 +694,8 @@ class PaperPortfolio {
     final oldQuantity = old?.quantity ?? 0.0;
     final oldCost = oldQuantity * (old?.averageCost ?? 0.0);
     final newQuantity = oldQuantity + quantity;
+
+    if (!newQuantity.isFinite || newQuantity <= 0) return false;
 
     final newAverageCost = (oldCost + total) / newQuantity;
 
@@ -692,11 +727,13 @@ class PaperPortfolio {
     required double price,
     required double quantity,
   }) {
-    if (symbol.isEmpty ||
+    if (symbol.trim().isEmpty ||
         !price.isFinite ||
         !quantity.isFinite ||
         price <= 0 ||
-        quantity <= 0) {
+        quantity <= 0 ||
+        !feeRate.isFinite ||
+        feeRate < 0) {
       return false;
     }
 
