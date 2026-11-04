@@ -19,7 +19,7 @@ class HomeScreen extends StatefulWidget {
 class _HomeScreenState extends State<HomeScreen> {
   static const String _symbol = 'BTCUSDT';
 
-  // تایم‌فریم قابل تغییر
+  // تایم‌فریم
   String _resolution = '60';
 
   int _tab = 0;
@@ -39,7 +39,7 @@ class _HomeScreenState extends State<HomeScreen> {
   final RiskManager _riskManager = const RiskManager();
 
   final PaperPortfolio _portfolio =
-      PaperPortfolio(initialUsdt: 50);
+      PaperPortfolio(initialUsdt: 50.0);
 
   Timer? _timer;
 
@@ -60,7 +60,7 @@ class _HomeScreenState extends State<HomeScreen> {
 
   double _dayStartEquity = 50.0;
 
-  List<Candle> _candles = [];
+  bool _riskLimitTriggered = false;
 
   // ==================== TIMEFRAME ====================
 
@@ -130,7 +130,7 @@ class _HomeScreenState extends State<HomeScreen> {
   // ==================== BOT CONTROL ====================
 
   void _startBot() {
-    if (_botEnabled) return;
+    if (_botEnabled || _riskLimitTriggered) return;
 
     setState(() {
       _botEnabled = true;
@@ -142,14 +142,13 @@ class _HomeScreenState extends State<HomeScreen> {
 
     _refreshMarket();
 
-    // بررسی بازار هر یک دقیقه
     _timer = Timer.periodic(
       const Duration(minutes: 1),
       (_) => _refreshMarket(),
     );
   }
 
-  void _stopBot() {
+  void _stopBot({String? reason}) {
     _timer?.cancel();
     _timer = null;
 
@@ -157,7 +156,12 @@ class _HomeScreenState extends State<HomeScreen> {
 
     setState(() {
       _botEnabled = false;
-      _message = 'ربات متوقف شد.';
+
+      if (reason != null) {
+        _message = reason;
+      } else {
+        _message = 'ربات متوقف شد.';
+      }
     });
   }
 
@@ -172,13 +176,15 @@ class _HomeScreenState extends State<HomeScreen> {
     });
 
     try {
-      // بررسی اتصال منبع قیمت
       bool connected = false;
       MarketQuote? latestQuote;
 
+      // بررسی اتصال ارائه‌دهنده قیمت
       try {
         final connectionResults =
-            await _marketHub.checkConnections(MarketType.crypto);
+            await _marketHub.checkConnections(
+          MarketType.crypto,
+        );
 
         connected = connectionResults.any(
           (status) => status.connected,
@@ -201,7 +207,7 @@ class _HomeScreenState extends State<HomeScreen> {
 
       if (!mounted) return;
 
-      // دریافت کندل‌ها از Binance
+      // دریافت کندل‌ها
       final candles = await _market.fetchCandles(
         symbol: _symbol,
         resolution: _resolution,
@@ -213,7 +219,7 @@ class _HomeScreenState extends State<HomeScreen> {
 
       final now = DateTime.now().toUtc();
 
-      // حذف کندل باز و استفاده از کندل‌های بسته‌شده
+      // حذف کندل باز
       final closedCandles = candles.where((candle) {
         final closeTime = candle.time
             .toUtc()
@@ -229,39 +235,37 @@ class _HomeScreenState extends State<HomeScreen> {
       }
 
       final latest = closedCandles.last;
-
-      final signal = _signalEngine.analyze(closedCandles);
-
       final price = latest.close;
 
       if (!price.isFinite || price <= 0) {
         throw Exception('قیمت دریافتی معتبر نیست.');
       }
 
-      _candles = closedCandles;
-      _lastPrice = price;
-      _lastSignal = signal;
+      final signal = _signalEngine.analyze(closedCandles);
 
       setState(() {
+        _lastPrice = price;
+        _lastSignal = signal;
         _providerConnected = connected;
         _lastQuote = latestQuote;
 
         _marketSourceMessage = connected
-            ? 'اتصال قیمت Binance برقرار است'
-            : 'کندل‌ها از Binance دریافت شدند؛ اتصال قیمت لحظه‌ای تأیید نشد.';
+            ? 'اتصال قیمت Binance برقرار است.'
+            : 'کندل‌ها دریافت شدند؛ اتصال قیمت لحظه‌ای تأیید نشد.';
       });
 
-      // تصمیم‌گیری فقط یک بار برای هر کندل بسته‌شده
+      // پردازش هر کندل فقط یک بار
       if (_botEnabled &&
           (_lastCandleTime == null ||
               latest.time.isAfter(_lastCandleTime!))) {
         _lastCandleTime = latest.time;
+
         _executeSignal(signal, price);
       }
 
-      if (mounted) {
+      if (mounted && !_botEnabled) {
         setState(() {
-          if (!_botEnabled) {
+          if (_error == null) {
             _message = 'اطلاعات بازار با موفقیت دریافت شد.';
           }
         });
@@ -295,7 +299,9 @@ class _HomeScreenState extends State<HomeScreen> {
     final equity = _portfolio.equity(prices);
 
     if (!equity.isFinite || equity <= 0) {
-      _message = 'ارزش سبد قابل محاسبه نیست.';
+      _stopBot(
+        reason: 'ارزش سبد معتبر نیست؛ ربات برای محافظت متوقف شد.',
+      );
       return;
     }
 
@@ -314,18 +320,28 @@ class _HomeScreenState extends State<HomeScreen> {
       startingEquity: _dayStartEquity,
       currentEquity: equity,
     )) {
-      _message = 'حد زیان روزانه ۱٪ فعال شد.';
-      _stopBot();
+      _riskLimitTriggered = true;
+
+      _stopBot(
+        reason: 'حد زیان روزانه ۱٪ فعال شد؛ ربات متوقف شد.',
+      );
+
       return;
     }
 
-    // محدودیت افت سرمایه
-    if (_riskManager.drawdownLimitReached(
-      initialEquity: _portfolio.initialUsdt,
-      currentEquity: equity,
-    )) {
-      _message = 'حد افت سرمایه ۵٪ فعال شد.';
-      _stopBot();
+    // محدودیت افت سرمایه از بالاترین ارزش ثبت‌شده
+    if (_portfolio.maximumDrawdown >=
+            _riskManager.maxDrawdown ||
+        _riskManager.drawdownLimitReached(
+          initialEquity: _portfolio.initialUsdt,
+          currentEquity: equity,
+        )) {
+      _riskLimitTriggered = true;
+
+      _stopBot(
+        reason: 'حد افت سرمایه ۵٪ فعال شد؛ ربات متوقف شد.',
+      );
+
       return;
     }
 
@@ -345,7 +361,7 @@ class _HomeScreenState extends State<HomeScreen> {
 
       final quantity = (notional * 0.998) / price;
 
-      if (quantity <= 0 || !quantity.isFinite) {
+      if (!quantity.isFinite || quantity <= 0) {
         _message = 'حجم معامله معتبر نیست.';
         return;
       }
@@ -407,7 +423,9 @@ class _HomeScreenState extends State<HomeScreen> {
             SizedBox(width: 9),
             Text(
               'AI Trade Pro',
-              style: TextStyle(fontWeight: FontWeight.bold),
+              style: TextStyle(
+                fontWeight: FontWeight.bold,
+              ),
             ),
           ],
         ),
@@ -519,7 +537,7 @@ class _HomeScreenState extends State<HomeScreen> {
           children: [
             Expanded(
               child: _metric(
-                'معاملات ثبت‌شده',
+                'تعداد معاملات',
                 '${_portfolio.fills.length}',
                 Icons.receipt_long,
               ),
@@ -543,6 +561,28 @@ class _HomeScreenState extends State<HomeScreen> {
               ? unrealized.toStringAsFixed(2)
               : '—',
           Icons.account_balance_wallet,
+        ),
+
+        const SizedBox(height: 10),
+
+        Row(
+          children: [
+            Expanded(
+              child: _metric(
+                'بالاترین ارزش سبد',
+                _portfolio.peakEquity.toStringAsFixed(2),
+                Icons.trending_up,
+              ),
+            ),
+            const SizedBox(width: 10),
+            Expanded(
+              child: _metric(
+                'حداکثر افت سرمایه',
+                '${(_portfolio.maximumDrawdown * 100).toStringAsFixed(2)}٪',
+                Icons.warning_amber,
+              ),
+            ),
+          ],
         ),
 
         const SizedBox(height: 14),
@@ -604,6 +644,7 @@ class _HomeScreenState extends State<HomeScreen> {
 
         const SizedBox(height: 14),
 
+        // وضعیت بازار
         Card(
           child: Padding(
             padding: const EdgeInsets.all(16),
@@ -674,6 +715,7 @@ class _HomeScreenState extends State<HomeScreen> {
 
         const SizedBox(height: 14),
 
+        // وضعیت ربات
         Card(
           child: Padding(
             padding: const EdgeInsets.all(16),
@@ -700,6 +742,11 @@ class _HomeScreenState extends State<HomeScreen> {
             ),
           ),
         ),
+
+        const SizedBox(height: 14),
+
+        // تاریخچه معاملات
+        _tradeHistory(),
 
         const SizedBox(height: 14),
 
@@ -732,6 +779,76 @@ class _HomeScreenState extends State<HomeScreen> {
           ],
         ),
       ],
+    );
+  }
+
+  // ==================== TRADE HISTORY ====================
+
+  Widget _tradeHistory() {
+    final fills = _portfolio.fills.reversed.toList();
+
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text(
+              'تاریخچه معاملات آزمایشی',
+              style: TextStyle(
+                fontWeight: FontWeight.bold,
+                fontSize: 16,
+              ),
+            ),
+            const SizedBox(height: 12),
+            if (fills.isEmpty)
+              const Text(
+                'هنوز معامله‌ای ثبت نشده است.',
+                style: TextStyle(color: Colors.white60),
+              )
+            else
+              ...fills.take(10).map((fill) {
+                final isBuy = fill.side == 'BUY';
+
+                return ListTile(
+                  contentPadding: EdgeInsets.zero,
+                  leading: CircleAvatar(
+                    backgroundColor: isBuy
+                        ? const Color(0xFF174B38)
+                        : const Color(0xFF512B32),
+                    child: Icon(
+                      isBuy ? Icons.south_west : Icons.north_east,
+                      color: isBuy
+                          ? Colors.greenAccent
+                          : Colors.redAccent,
+                    ),
+                  ),
+                  title: Text(
+                    '${isBuy ? 'خرید' : 'فروش'} ${fill.symbol}',
+                  ),
+                  subtitle: Text(
+                    'قیمت: ${fill.price.toStringAsFixed(2)} | مقدار: ${fill.quantity.toStringAsFixed(6)}\n'
+                    'کارمزد: ${fill.fee.toStringAsFixed(4)} USDT\n'
+                    '${_formatTime(fill.time)}',
+                  ),
+                  trailing: Text(
+                    isBuy
+                        ? 'خرید'
+                        : '${fill.realizedPnl >= 0 ? '+' : ''}${fill.realizedPnl.toStringAsFixed(2)}',
+                    style: TextStyle(
+                      color: isBuy
+                          ? Colors.greenAccent
+                          : fill.realizedPnl >= 0
+                              ? Colors.greenAccent
+                              : Colors.redAccent,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                );
+              }),
+          ],
+        ),
+      ),
     );
   }
 
@@ -769,9 +886,11 @@ class _HomeScreenState extends State<HomeScreen> {
                     ),
                   ),
                   const SizedBox(height: 3),
-                  const Text(
-                    'فقط معاملات مجازی؛ بدون سفارش واقعی',
-                    style: TextStyle(
+                  Text(
+                    _riskLimitTriggered
+                        ? 'محدودیت ریسک فعال شده است.'
+                        : 'فقط معاملات مجازی؛ بدون سفارش واقعی',
+                    style: const TextStyle(
                       color: Colors.white70,
                       fontSize: 11,
                     ),
@@ -781,13 +900,15 @@ class _HomeScreenState extends State<HomeScreen> {
             ),
             Switch(
               value: _botEnabled,
-              onChanged: (value) {
-                if (value) {
-                  _startBot();
-                } else {
-                  _stopBot();
-                }
-              },
+              onChanged: _riskLimitTriggered
+                  ? null
+                  : (value) {
+                      if (value) {
+                        _startBot();
+                      } else {
+                        _stopBot();
+                      }
+                    },
             ),
           ],
         ),
@@ -808,46 +929,37 @@ class _HomeScreenState extends State<HomeScreen> {
             fontWeight: FontWeight.bold,
           ),
         ),
-
         const SizedBox(height: 8),
-
         const Text(
           'در این نسخه، دریافت کندل و قیمت عمومی فقط برای بازار رمزارز Binance پیاده‌سازی شده است. سایر بازارها هنوز به ارائه‌دهنده واقعی متصل نشده‌اند.',
           style: TextStyle(color: Colors.white60),
         ),
-
         const SizedBox(height: 14),
-
         _marketTile(
           'Binance',
           'BTC/USDT · داده عمومی بازار رمزارز',
           Icons.currency_bitcoin,
           _providerConnected ? 'متصل' : 'بررسی اتصال',
         ),
-
         _marketTile(
           'بازار فارکس',
           'نیازمند اتصال به کارگزار و منبع قیمت',
           Icons.currency_exchange,
           'در انتظار اتصال',
         ),
-
         _marketTile(
           'سهام و شاخص‌ها',
           'نیازمند ارائه‌دهنده اطلاعات و کارگزار',
           Icons.show_chart,
           'در انتظار اتصال',
         ),
-
         _marketTile(
           'کالاها',
           'نیازمند ارائه‌دهنده اطلاعات بازار',
           Icons.factory_outlined,
           'در انتظار اتصال',
         ),
-
         const SizedBox(height: 12),
-
         Card(
           child: Padding(
             padding: const EdgeInsets.all(16),
@@ -858,9 +970,7 @@ class _HomeScreenState extends State<HomeScreen> {
             ),
           ),
         ),
-
         const SizedBox(height: 8),
-
         OutlinedButton.icon(
           onPressed: _isBusy ? null : _refreshMarket,
           icon: const Icon(Icons.sync),
@@ -901,35 +1011,28 @@ class _HomeScreenState extends State<HomeScreen> {
             fontWeight: FontWeight.bold,
           ),
         ),
-
         const SizedBox(height: 12),
-
         _feature(
           'تحلیل روند',
           'EMA 9 و EMA 21',
           Icons.trending_up,
         ),
-
         _feature(
           'مومنتوم',
           'RSI با دوره ۱۴',
           Icons.speed,
         ),
-
         _feature(
           'همگرایی و واگرایی',
           'MACD استاندارد',
           Icons.multiline_chart,
         ),
-
         _feature(
           'مدیریت ریسک',
           'ریسک ۰٫۵٪ برای هر معامله',
           Icons.shield_outlined,
         ),
-
         const SizedBox(height: 14),
-
         Card(
           child: Padding(
             padding: const EdgeInsets.all(16),
@@ -963,9 +1066,7 @@ class _HomeScreenState extends State<HomeScreen> {
             ),
           ),
         ),
-
         const SizedBox(height: 12),
-
         const Card(
           child: Padding(
             padding: EdgeInsets.all(16),
@@ -991,63 +1092,58 @@ class _HomeScreenState extends State<HomeScreen> {
             fontWeight: FontWeight.bold,
           ),
         ),
-
         const SizedBox(height: 12),
-
         _feature(
           'سرمایه آزمایشی',
           '۵۰ USDT',
           Icons.account_balance_wallet,
         ),
-
         _feature(
           'ریسک هر معامله',
           '۰٫۵٪ از ارزش سبد',
           Icons.shield_outlined,
         ),
-
         _feature(
           'حداکثر زیان روزانه',
           '۱٪ از سرمایه ابتدای روز',
           Icons.warning_amber,
         ),
-
         _feature(
           'حد افت سرمایه',
-          '۵٪ از سرمایه اولیه',
+          '۵٪ از بالاترین ارزش ثبت‌شده سبد یا سرمایه اولیه',
           Icons.security,
         ),
-
         _feature(
           'اهرم',
           'غیرفعال؛ معاملات بدون اهرم',
           Icons.block,
         ),
-
+        _feature(
+          'حالت معامله',
+          'فقط آزمایشی (Paper Trading)',
+          Icons.science,
+        ),
         const SizedBox(height: 12),
-
+        Card(
+          child: Padding(
+            padding: const EdgeInsets.all(16),
+            child: Text(
+              _riskLimitTriggered
+                  ? 'محدودیت ریسک فعال شده است. برای جلوگیری از ادامه زیان، شروع مجدد ربات در این نشست غیرفعال است.'
+                  : 'ربات در حالت آزمایشی کار می‌کند. اطلاعات سبد پس از بستن برنامه هنوز ذخیره نمی‌شود. اجرای دوره‌ای نیز فقط تا زمانی انجام می‌شود که برنامه در پیش‌زمینه فعال باشد.',
+            ),
+          ),
+        ),
+        const SizedBox(height: 12),
         const Card(
           child: Padding(
             padding: EdgeInsets.all(16),
             child: Text(
-              'این نسخه فقط برای معاملات آزمایشی است. اطلاعات سبد پس از بستن برنامه هنوز ذخیره نمی‌شود. اجرای دوره‌ای نیز فقط تا زمانی انجام می‌شود که برنامه در پیش‌زمینه فعال باشد.',
+              'حد ضرر ۲٪ فعلاً برای محاسبه اندازه موقعیت استفاده می‌شود و هنوز به‌صورت سفارش مستقل یا کنترل لحظه‌ای اجرا نمی‌شود.',
             ),
           ),
         ),
-
         const SizedBox(height: 12),
-
-        const Card(
-          child: Padding(
-            padding: EdgeInsets.all(16),
-            child: Text(
-              'حد ضرر ۲٪ فعلاً فقط برای محاسبه اندازه موقعیت استفاده می‌شود و هنوز به‌صورت سفارش یا کنترل مستقل اجرا نمی‌شود.',
-            ),
-          ),
-        ),
-
-        const SizedBox(height: 12),
-
         const Card(
           child: Padding(
             padding: EdgeInsets.all(16),
