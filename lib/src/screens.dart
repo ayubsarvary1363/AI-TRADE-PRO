@@ -4,6 +4,10 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 
 import 'engine.dart';
+import 'exchange_router.dart';
+import 'market_provider.dart';
+import 'market_hub.dart';
+import 'provider_setup.dart';
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
@@ -14,13 +18,23 @@ class HomeScreen extends StatefulWidget {
 
 class _HomeScreenState extends State<HomeScreen> {
   static const String _symbol = 'BTCUSDT';
-  static const String _resolution = '60';
+
+  // تایم‌فریم قابل تغییر
+  String _resolution = '60';
 
   int _tab = 0;
   bool _botEnabled = false;
   bool _isBusy = false;
 
   final MarketDataService _market = MarketDataService();
+
+  final MarketProviderRegistry _providerRegistry =
+      ProviderSetup.createRegistry();
+
+  late final MarketHub _marketHub = MarketHub(
+    registry: _providerRegistry,
+  );
+
   final SignalEngine _signalEngine = SignalEngine();
   final RiskManager _riskManager = const RiskManager();
 
@@ -30,10 +44,16 @@ class _HomeScreenState extends State<HomeScreen> {
   Timer? _timer;
 
   double? _lastPrice;
+  MarketQuote? _lastQuote;
+
+  bool _providerConnected = false;
+
   SignalResult? _lastSignal;
 
   String _message = 'برای شروع، دریافت اطلاعات بازار را بزنید.';
   String? _error;
+
+  String _marketSourceMessage = 'منبع داده: Binance';
 
   DateTime? _lastCandleTime;
   DateTime _currentDay = DateTime.now();
@@ -42,10 +62,68 @@ class _HomeScreenState extends State<HomeScreen> {
 
   List<Candle> _candles = [];
 
+  // ==================== TIMEFRAME ====================
+
+  Duration get _selectedTimeframeDuration {
+    switch (_resolution) {
+      case '1':
+        return const Duration(minutes: 1);
+      case '5':
+        return const Duration(minutes: 5);
+      case '15':
+        return const Duration(minutes: 15);
+      case '30':
+        return const Duration(minutes: 30);
+      case '60':
+        return const Duration(hours: 1);
+      case '240':
+        return const Duration(hours: 4);
+      case 'D':
+        return const Duration(days: 1);
+      default:
+        return const Duration(hours: 1);
+    }
+  }
+
+  String get _timeframeLabel {
+    switch (_resolution) {
+      case '1':
+        return '۱ دقیقه';
+      case '5':
+        return '۵ دقیقه';
+      case '15':
+        return '۱۵ دقیقه';
+      case '30':
+        return '۳۰ دقیقه';
+      case '60':
+        return '۱ ساعت';
+      case '240':
+        return '۴ ساعت';
+      case 'D':
+        return 'روزانه';
+      default:
+        return '۱ ساعت';
+    }
+  }
+
+  void _changeTimeframe(String? value) {
+    if (value == null || value == _resolution) return;
+
+    setState(() {
+      _resolution = value;
+      _lastCandleTime = null;
+      _lastSignal = null;
+      _message = 'تایم‌فریم تغییر کرد؛ اطلاعات جدید دریافت می‌شود.';
+    });
+
+    _refreshMarket();
+  }
+
   @override
   void dispose() {
     _timer?.cancel();
     _market.dispose();
+    _marketHub.dispose();
     super.dispose();
   }
 
@@ -62,7 +140,6 @@ class _HomeScreenState extends State<HomeScreen> {
 
     _timer?.cancel();
 
-    // اجرای اولیه
     _refreshMarket();
 
     // بررسی بازار هر یک دقیقه
@@ -95,20 +172,52 @@ class _HomeScreenState extends State<HomeScreen> {
     });
 
     try {
+      // بررسی اتصال منبع قیمت
+      bool connected = false;
+      MarketQuote? latestQuote;
+
+      try {
+        final connectionResults =
+            await _marketHub.checkConnections(MarketType.crypto);
+
+        connected = connectionResults.any(
+          (status) => status.connected,
+        );
+
+        if (connected) {
+          final quotes = await _marketHub.collectQuotes(
+            MarketType.crypto,
+            _symbol,
+          );
+
+          if (quotes.isNotEmpty) {
+            latestQuote = quotes.first;
+          }
+        }
+      } catch (_) {
+        connected = false;
+        latestQuote = null;
+      }
+
+      if (!mounted) return;
+
+      // دریافت کندل‌ها از Binance
       final candles = await _market.fetchCandles(
         symbol: _symbol,
         resolution: _resolution,
         countback: 100,
+        provider: 'binance',
       );
 
       if (!mounted) return;
 
-      final now = DateTime.now();
+      final now = DateTime.now().toUtc();
 
-      // فقط کندل‌های یک‌ساعته بسته‌شده
+      // حذف کندل باز و استفاده از کندل‌های بسته‌شده
       final closedCandles = candles.where((candle) {
-        final closeTime =
-            candle.time.add(const Duration(hours: 1));
+        final closeTime = candle.time
+            .toUtc()
+            .add(_selectedTimeframeDuration);
 
         return !closeTime.isAfter(now);
       }).toList();
@@ -121,9 +230,7 @@ class _HomeScreenState extends State<HomeScreen> {
 
       final latest = closedCandles.last;
 
-      final signal = _signalEngine.analyze(
-        closedCandles,
-      );
+      final signal = _signalEngine.analyze(closedCandles);
 
       final price = latest.close;
 
@@ -135,7 +242,16 @@ class _HomeScreenState extends State<HomeScreen> {
       _lastPrice = price;
       _lastSignal = signal;
 
-      // فقط یک بار برای هر کندل تصمیم‌گیری می‌شود.
+      setState(() {
+        _providerConnected = connected;
+        _lastQuote = latestQuote;
+
+        _marketSourceMessage = connected
+            ? 'اتصال قیمت Binance برقرار است'
+            : 'کندل‌ها از Binance دریافت شدند؛ اتصال قیمت لحظه‌ای تأیید نشد.';
+      });
+
+      // تصمیم‌گیری فقط یک بار برای هر کندل بسته‌شده
       if (_botEnabled &&
           (_lastCandleTime == null ||
               latest.time.isAfter(_lastCandleTime!))) {
@@ -193,7 +309,7 @@ class _HomeScreenState extends State<HomeScreen> {
       _dayStartEquity = equity;
     }
 
-    // محدودیت افت روزانه
+    // محدودیت زیان روزانه
     if (_riskManager.dailyLossLimitReached(
       startingEquity: _dayStartEquity,
       currentEquity: equity,
@@ -203,7 +319,7 @@ class _HomeScreenState extends State<HomeScreen> {
       return;
     }
 
-    // محدودیت افت سرمایه اولیه
+    // محدودیت افت سرمایه
     if (_riskManager.drawdownLimitReached(
       initialEquity: _portfolio.initialUsdt,
       currentEquity: equity,
@@ -219,8 +335,6 @@ class _HomeScreenState extends State<HomeScreen> {
 
     if (signal.direction == SignalDirection.buy &&
         position == null) {
-      // فاصله ۲٪ صرفاً برای محاسبه اندازه موقعیت است.
-      // این نسخه هنوز سفارش حد ضرر مستقل اجرا نمی‌کند.
       final stopPrice = price * 0.98;
 
       final notional = _riskManager.positionNotional(
@@ -229,7 +343,6 @@ class _HomeScreenState extends State<HomeScreen> {
         stop: stopPrice,
       );
 
-      // حاشیه برای کارمزد خرید
       final quantity = (notional * 0.998) / price;
 
       if (quantity <= 0 || !quantity.isFinite) {
@@ -434,6 +547,63 @@ class _HomeScreenState extends State<HomeScreen> {
 
         const SizedBox(height: 14),
 
+        // انتخاب تایم‌فریم
+        Card(
+          child: Padding(
+            padding: const EdgeInsets.all(16),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Text(
+                  'تایم‌فریم تحلیل',
+                  style: TextStyle(fontWeight: FontWeight.bold),
+                ),
+                const SizedBox(height: 10),
+                DropdownButtonFormField<String>(
+                  value: _resolution,
+                  decoration: const InputDecoration(
+                    border: OutlineInputBorder(),
+                    labelText: 'انتخاب بازه زمانی',
+                  ),
+                  items: const [
+                    DropdownMenuItem(
+                      value: '1',
+                      child: Text('۱ دقیقه'),
+                    ),
+                    DropdownMenuItem(
+                      value: '5',
+                      child: Text('۵ دقیقه'),
+                    ),
+                    DropdownMenuItem(
+                      value: '15',
+                      child: Text('۱۵ دقیقه'),
+                    ),
+                    DropdownMenuItem(
+                      value: '30',
+                      child: Text('۳۰ دقیقه'),
+                    ),
+                    DropdownMenuItem(
+                      value: '60',
+                      child: Text('۱ ساعت'),
+                    ),
+                    DropdownMenuItem(
+                      value: '240',
+                      child: Text('۴ ساعت'),
+                    ),
+                    DropdownMenuItem(
+                      value: 'D',
+                      child: Text('روزانه'),
+                    ),
+                  ],
+                  onChanged: _isBusy ? null : _changeTimeframe,
+                ),
+              ],
+            ),
+          ),
+        ),
+
+        const SizedBox(height: 14),
+
         Card(
           child: Padding(
             padding: const EdgeInsets.all(16),
@@ -455,10 +625,33 @@ class _HomeScreenState extends State<HomeScreen> {
                   ),
                 ),
                 const SizedBox(height: 8),
+                Text('تایم‌فریم: $_timeframeLabel'),
+                const SizedBox(height: 8),
+                Text(
+                  _marketSourceMessage,
+                  style: TextStyle(
+                    color: _providerConnected
+                        ? Colors.greenAccent
+                        : Colors.orangeAccent,
+                    fontSize: 12,
+                  ),
+                ),
+                if (_lastQuote != null) ...[
+                  const SizedBox(height: 8),
+                  Text(
+                    'قیمت خرید: ${_lastQuote!.ask}',
+                    style: const TextStyle(color: Colors.white70),
+                  ),
+                  Text(
+                    'قیمت فروش: ${_lastQuote!.bid}',
+                    style: const TextStyle(color: Colors.white70),
+                  ),
+                ],
+                const SizedBox(height: 8),
                 Text(
                   _isBusy
                       ? 'در حال دریافت اطلاعات...'
-                      : _error ?? 'اتصال اطلاعات بازار آماده است.',
+                      : _error ?? 'وضعیت دریافت اطلاعات آماده است.',
                   style: TextStyle(
                     color: _error == null
                         ? Colors.white60
@@ -488,7 +681,7 @@ class _HomeScreenState extends State<HomeScreen> {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 const Text(
-                  'آخرین وضعیت ربات',
+                  'وضعیت ربات',
                   style: TextStyle(fontWeight: FontWeight.bold),
                 ),
                 const SizedBox(height: 8),
@@ -609,7 +802,7 @@ class _HomeScreenState extends State<HomeScreen> {
       padding: const EdgeInsets.all(16),
       children: [
         const Text(
-          'بازارهای تحت پشتیبانی',
+          'بازارها و منابع اطلاعات',
           style: TextStyle(
             fontSize: 20,
             fontWeight: FontWeight.bold,
@@ -619,23 +812,37 @@ class _HomeScreenState extends State<HomeScreen> {
         const SizedBox(height: 8),
 
         const Text(
-          'نسخه فعلی برای آزمایش داده‌های عمومی نوبیتکس تنظیم شده است.',
+          'در این نسخه، دریافت کندل و قیمت عمومی فقط برای بازار رمزارز Binance پیاده‌سازی شده است. سایر بازارها هنوز به ارائه‌دهنده واقعی متصل نشده‌اند.',
           style: TextStyle(color: Colors.white60),
         ),
 
         const SizedBox(height: 14),
 
         _marketTile(
-          'نوبیتکس',
-          'BTC/USDT · اطلاعات عمومی بازار',
-          Icons.account_balance,
-          'قابل دریافت',
+          'Binance',
+          'BTC/USDT · داده عمومی بازار رمزارز',
+          Icons.currency_bitcoin,
+          _providerConnected ? 'متصل' : 'بررسی اتصال',
         ),
 
         _marketTile(
-          'بازار جهانی',
-          'اتصال به منبع داده جهانی در مرحله بعد',
-          Icons.public,
+          'بازار فارکس',
+          'نیازمند اتصال به کارگزار و منبع قیمت',
+          Icons.currency_exchange,
+          'در انتظار اتصال',
+        ),
+
+        _marketTile(
+          'سهام و شاخص‌ها',
+          'نیازمند ارائه‌دهنده اطلاعات و کارگزار',
+          Icons.show_chart,
+          'در انتظار اتصال',
+        ),
+
+        _marketTile(
+          'کالاها',
+          'نیازمند ارائه‌دهنده اطلاعات بازار',
+          Icons.factory_outlined,
           'در انتظار اتصال',
         ),
 
@@ -647,9 +854,17 @@ class _HomeScreenState extends State<HomeScreen> {
             child: Text(
               _lastPrice == null
                   ? 'قیمت BTC/USDT هنوز دریافت نشده است.'
-                  : 'آخرین قیمت دریافتی BTC/USDT: ${_lastPrice!.toStringAsFixed(2)} USDT',
+                  : 'آخرین قیمت کندل BTC/USDT: ${_lastPrice!.toStringAsFixed(2)} USDT',
             ),
           ),
+        ),
+
+        const SizedBox(height: 8),
+
+        OutlinedButton.icon(
+          onPressed: _isBusy ? null : _refreshMarket,
+          icon: const Icon(Icons.sync),
+          label: const Text('بررسی دوباره اتصال و قیمت'),
         ),
       ],
     );
@@ -815,7 +1030,7 @@ class _HomeScreenState extends State<HomeScreen> {
           child: Padding(
             padding: EdgeInsets.all(16),
             child: Text(
-              'این نسخه فقط برای معاملات آزمایشی است. اطلاعات سبد در این نسخه هنوز پس از بستن برنامه ذخیره نمی‌شود. اجرای دوره‌ای نیز فقط تا زمانی انجام می‌شود که برنامه در پیش‌زمینه فعال باشد.',
+              'این نسخه فقط برای معاملات آزمایشی است. اطلاعات سبد پس از بستن برنامه هنوز ذخیره نمی‌شود. اجرای دوره‌ای نیز فقط تا زمانی انجام می‌شود که برنامه در پیش‌زمینه فعال باشد.',
             ),
           ),
         ),
@@ -827,6 +1042,17 @@ class _HomeScreenState extends State<HomeScreen> {
             padding: EdgeInsets.all(16),
             child: Text(
               'حد ضرر ۲٪ فعلاً فقط برای محاسبه اندازه موقعیت استفاده می‌شود و هنوز به‌صورت سفارش یا کنترل مستقل اجرا نمی‌شود.',
+            ),
+          ),
+        ),
+
+        const SizedBox(height: 12),
+
+        const Card(
+          child: Padding(
+            padding: EdgeInsets.all(16),
+            child: Text(
+              'اتصال به صرافی‌های دیگر، کارگزاران فارکس و بازارهای سهام و کالا در مراحل بعدی توسعه انجام می‌شود. انتخاب خودکار ارائه‌دهنده تا زمان اتصال و ارزیابی واقعی آن‌ها فعال نیست.',
             ),
           ),
         ),
