@@ -5,7 +5,7 @@ import 'dart:math';
 import 'package:http/http.dart' as http;
 
 // =====================================================
-// AI TRADE PRO - ENGINE VERSION 0.2.0
+// AI TRADE PRO - ENGINE VERSION 0.3.0
 // Paper trading only - No real orders
 // =====================================================
 
@@ -43,7 +43,8 @@ class MarketDataException implements Exception {
 }
 
 class MarketDataService {
-  static const String baseUrl = 'https://apiv2.nobitex.ir';
+  static const String _binanceUrl = 'https://api.binance.com';
+  static const String _nobitexUrl = 'https://apiv2.nobitex.ir';
 
   final http.Client _client;
 
@@ -54,17 +55,169 @@ class MarketDataService {
     String symbol = 'BTCUSDT',
     String resolution = '60',
     int countback = 100,
+    String provider = 'binance',
   }) async {
-    if (countback < 30 || countback > 500) {
+    if (countback < 30 || countback > 1000) {
       throw const MarketDataException(
-        'تعداد کندل باید بین ۳۰ تا ۵۰۰ باشد.',
+        'تعداد کندل باید بین ۳۰ تا ۱۰۰۰ باشد.',
       );
     }
 
+    final normalizedSymbol = symbol.trim().toUpperCase();
+
+    if (normalizedSymbol.isEmpty) {
+      throw const MarketDataException('نماد معتبر نیست.');
+    }
+
+    if (provider == 'binance') {
+      return _fetchBinanceCandles(
+        normalizedSymbol,
+        resolution,
+        countback,
+      );
+    }
+
+    if (provider == 'nobitex') {
+      return _fetchNobitexCandles(
+        normalizedSymbol,
+        resolution,
+        countback,
+      );
+    }
+
+    throw const MarketDataException(
+      'منبع اطلاعات بازار پشتیبانی نمی‌شود.',
+    );
+  }
+
+  Future<List<Candle>> _fetchBinanceCandles(
+    String symbol,
+    String resolution,
+    int countback,
+  ) async {
+    const intervals = {
+      '1': '1m',
+      '3': '3m',
+      '5': '5m',
+      '15': '15m',
+      '30': '30m',
+      '60': '1h',
+      '120': '2h',
+      '240': '4h',
+      '360': '6h',
+      '480': '8h',
+      '720': '12h',
+      'D': '1d',
+      'W': '1w',
+      'M': '1M',
+    };
+
+    final interval = intervals[resolution];
+
+    if (interval == null) {
+      throw const MarketDataException(
+        'تایم‌فریم Binance پشتیبانی نمی‌شود.',
+      );
+    }
+
+    final uri = Uri.parse(
+      '$_binanceUrl/api/v3/klines',
+    ).replace(
+      queryParameters: {
+        'symbol': symbol,
+        'interval': interval,
+        'limit': '$countback',
+      },
+    );
+
+    try {
+      final response = await _client
+          .get(uri)
+          .timeout(const Duration(seconds: 15));
+
+      if (response.statusCode != 200) {
+        throw MarketDataException(
+          'خطای Binance: ${response.statusCode}',
+        );
+      }
+
+      final dynamic decoded = jsonDecode(response.body);
+
+      if (decoded is! List) {
+        throw const MarketDataException(
+          'ساختار کندل‌های Binance معتبر نیست.',
+        );
+      }
+
+      final candles = <Candle>[];
+
+      for (final item in decoded) {
+        if (item is! List || item.length < 6) {
+          continue;
+        }
+
+        final timestamp = _number(item[0]);
+        final high = _number(item[2]);
+        final low = _number(item[3]);
+        final close = _number(item[4]);
+        final volume = _number(item[5]);
+
+        if (timestamp <= 0 ||
+            high <= 0 ||
+            low <= 0 ||
+            close <= 0 ||
+            high < low ||
+            close > high ||
+            close < low ||
+            !timestamp.isFinite ||
+            !high.isFinite ||
+            !low.isFinite ||
+            !close.isFinite ||
+            !volume.isFinite) {
+          continue;
+        }
+
+        candles.add(
+          Candle(
+            time: DateTime.fromMillisecondsSinceEpoch(
+              timestamp.toInt(),
+              isUtc: true,
+            ),
+            close: close,
+            high: high,
+            low: low,
+            volume: max(0.0, volume),
+          ),
+        );
+      }
+
+      candles.sort((a, b) => a.time.compareTo(b.time));
+
+      if (candles.length < 30) {
+        throw const MarketDataException(
+          'کندل معتبر کافی از Binance دریافت نشد.',
+        );
+      }
+
+      return candles;
+    } on MarketDataException {
+      rethrow;
+    } catch (e) {
+      throw MarketDataException(
+        'خطا در دریافت کندل Binance: $e',
+      );
+    }
+  }
+
+  Future<List<Candle>> _fetchNobitexCandles(
+    String symbol,
+    String resolution,
+    int countback,
+  ) async {
     final now = DateTime.now().millisecondsSinceEpoch ~/ 1000;
 
     final uri = Uri.parse(
-      '$baseUrl/market/udf/history',
+      '$_nobitexUrl/market/udf/history',
     ).replace(
       queryParameters: {
         'symbol': symbol,
@@ -81,21 +234,15 @@ class MarketDataService {
 
       if (response.statusCode != 200) {
         throw MarketDataException(
-          'خطای سرور: ${response.statusCode}',
+          'خطای نوبیتکس: ${response.statusCode}',
         );
       }
 
       final dynamic decoded = jsonDecode(response.body);
 
-      if (decoded is! Map) {
+      if (decoded is! Map || decoded['s'] != 'ok') {
         throw const MarketDataException(
-          'پاسخ نامعتبر از بازار دریافت شد.',
-        );
-      }
-
-      if (decoded['s'] != 'ok') {
-        throw MarketDataException(
-          'اطلاعات بازار موجود نیست: ${decoded['errmsg'] ?? decoded['s']}',
+          'اطلاعات کندل نوبیتکس موجود نیست.',
         );
       }
 
@@ -111,27 +258,17 @@ class MarketDataService {
           closes is! List ||
           volumes is! List) {
         throw const MarketDataException(
-          'ساختار اطلاعات کندل ناقص است.',
+          'ساختار اطلاعات نوبیتکس ناقص است.',
         );
       }
 
-      final lengths = [
+      final length = [
         times.length,
         highs.length,
         lows.length,
         closes.length,
         volumes.length,
-      ];
-
-      final length = lengths.reduce(
-        (a, b) => a < b ? a : b,
-      );
-
-      if (length < 30) {
-        throw const MarketDataException(
-          'تعداد کندل معتبر کافی نیست.',
-        );
-      }
+      ].reduce((a, b) => a < b ? a : b);
 
       final candles = <Candle>[];
 
@@ -171,13 +308,11 @@ class MarketDataService {
         );
       }
 
-      candles.sort(
-        (a, b) => a.time.compareTo(b.time),
-      );
+      candles.sort((a, b) => a.time.compareTo(b.time));
 
       if (candles.length < 30) {
         throw const MarketDataException(
-          'کندل معتبر کافی دریافت نشد.',
+          'کندل معتبر کافی از نوبیتکس دریافت نشد.',
         );
       }
 
@@ -186,7 +321,7 @@ class MarketDataService {
       rethrow;
     } catch (e) {
       throw MarketDataException(
-        'خطا در دریافت اطلاعات بازار: $e',
+        'خطا در دریافت کندل نوبیتکس: $e',
       );
     }
   }
@@ -223,17 +358,13 @@ class SignalEngine {
       return const SignalResult(
         direction: SignalDirection.hold,
         confidence: 0,
-        reasons: [
-          'برای تحلیل حداقل ۳۰ کندل لازم است.',
-        ],
+        reasons: ['برای تحلیل حداقل ۳۰ کندل لازم است.'],
       );
     }
 
     final closes = candles.map((c) => c.close).toList();
 
-    if (closes.any(
-      (v) => !v.isFinite || v <= 0,
-    )) {
+    if (closes.any((v) => !v.isFinite || v <= 0)) {
       return const SignalResult(
         direction: SignalDirection.hold,
         confidence: 0,
@@ -244,16 +375,21 @@ class SignalEngine {
     final ema9 = _ema(closes, 9);
     final ema21 = _ema(closes, 21);
     final rsi = _rsi(closes, 14);
-
     final macdValues = _macd(closes);
+
+    if (macdValues.length < 2) {
+      return const SignalResult(
+        direction: SignalDirection.hold,
+        confidence: 0,
+        reasons: ['داده کافی برای MACD وجود ندارد.'],
+      );
+    }
+
     final macd = macdValues.last;
-    final previousMacd =
-        macdValues[macdValues.length - 2];
+    final previousMacd = macdValues[macdValues.length - 2];
 
     var score = 0;
     final reasons = <String>[];
-
-    // EMA TREND
 
     if (ema9 > ema21) {
       score += 2;
@@ -262,8 +398,6 @@ class SignalEngine {
       score -= 2;
       reasons.add('روند EMA نزولی است.');
     }
-
-    // RSI MOMENTUM
 
     if (rsi >= 52 && rsi <= 68) {
       score++;
@@ -274,8 +408,6 @@ class SignalEngine {
     } else {
       reasons.add('RSI سیگنال مشخصی ندارد.');
     }
-
-    // MACD
 
     if (macd > 0 && macd > previousMacd) {
       score++;
@@ -298,7 +430,7 @@ class SignalEngine {
 
     return SignalResult(
       direction: direction,
-      confidence: confidence.toInt(),
+      confidence: confidence,
       reasons: reasons,
     );
   }
@@ -308,10 +440,7 @@ class SignalEngine {
 
     final k = 2.0 / (period + 1);
 
-    var result = values
-            .take(period)
-            .reduce((a, b) => a + b) /
-        period;
+    var result = values.take(period).reduce((a, b) => a + b) / period;
 
     for (final value in values.skip(period)) {
       result = value * k + result * (1 - k);
@@ -356,7 +485,6 @@ class SignalEngine {
     if (averageLoss == 0) return 100.0;
 
     final rs = averageGain / averageLoss;
-
     return 100.0 - (100.0 / (1.0 + rs));
   }
 
@@ -365,11 +493,7 @@ class SignalEngine {
 
     for (var i = 26; i < values.length; i++) {
       final sample = values.sublist(0, i + 1);
-
-      final fast = _ema(sample, 12);
-      final slow = _ema(sample, 26);
-
-      result.add(fast - slow);
+      result.add(_ema(sample, 12) - _ema(sample, 26));
     }
 
     return result;
@@ -418,9 +542,7 @@ class RiskManager {
   }) {
     if (startingEquity <= 0) return true;
 
-    final loss =
-        (startingEquity - currentEquity) / startingEquity;
-
+    final loss = (startingEquity - currentEquity) / startingEquity;
     return loss >= maxDailyLoss;
   }
 
@@ -430,9 +552,7 @@ class RiskManager {
   }) {
     if (initialEquity <= 0) return true;
 
-    final loss =
-        (initialEquity - currentEquity) / initialEquity;
-
+    final loss = (initialEquity - currentEquity) / initialEquity;
     return loss >= maxDrawdown;
   }
 }
@@ -450,13 +570,10 @@ class PaperPosition {
     required this.averageCost,
   });
 
-  double marketValue(double price) {
-    return quantity * price;
-  }
+  double marketValue(double price) => quantity * price;
 
-  double unrealizedPnl(double price) {
-    return (price - averageCost) * quantity;
-  }
+  double unrealizedPnl(double price) =>
+      (price - averageCost) * quantity;
 }
 
 // ==================== PAPER PORTFOLIO ====================
@@ -474,25 +591,20 @@ class PaperPortfolio {
   double _realizedPnl = 0.0;
 
   final List<PaperFill> _fills = [];
-
   final Map<String, PaperPosition> _positions = {};
 
   double get cash => _cash;
-
   double get realizedPnl => _realizedPnl;
 
-  List<PaperFill> get fills =>
-      List.unmodifiable(_fills);
+  List<PaperFill> get fills => List.unmodifiable(_fills);
 
   Map<String, PaperPosition> get positions =>
       Map.unmodifiable(_positions);
 
-  double get totalFees {
-    return _fills.fold(
-      0.0,
-      (sum, fill) => sum + fill.fee,
-    );
-  }
+  double get totalFees => _fills.fold(
+        0.0,
+        (sum, fill) => sum + fill.fee,
+      );
 
   double equity(Map<String, double> prices) {
     var result = _cash;
@@ -500,9 +612,7 @@ class PaperPortfolio {
     for (final entry in _positions.entries) {
       final price = prices[entry.key];
 
-      if (price == null ||
-          !price.isFinite ||
-          price <= 0) {
+      if (price == null || !price.isFinite || price <= 0) {
         return double.nan;
       }
 
@@ -518,9 +628,7 @@ class PaperPortfolio {
     for (final entry in _positions.entries) {
       final price = prices[entry.key];
 
-      if (price == null ||
-          !price.isFinite ||
-          price <= 0) {
+      if (price == null || !price.isFinite || price <= 0) {
         return double.nan;
       }
 
@@ -529,8 +637,6 @@ class PaperPortfolio {
 
     return result;
   }
-
-  // BUY
 
   bool buy({
     required String symbol,
@@ -549,21 +655,14 @@ class PaperPortfolio {
     final fee = cost * feeRate;
     final total = cost + fee;
 
-    if (!total.isFinite || total > _cash) {
-      return false;
-    }
+    if (!total.isFinite || total > _cash) return false;
 
     final old = _positions[symbol];
-
     final oldQuantity = old?.quantity ?? 0.0;
-
-    final oldCost =
-        oldQuantity * (old?.averageCost ?? 0.0);
-
+    final oldCost = oldQuantity * (old?.averageCost ?? 0.0);
     final newQuantity = oldQuantity + quantity;
 
-    final newAverageCost =
-        (oldCost + total) / newQuantity;
+    final newAverageCost = (oldCost + total) / newQuantity;
 
     _cash -= total;
 
@@ -588,8 +687,6 @@ class PaperPortfolio {
     return true;
   }
 
-  // SELL
-
   bool sell({
     required String symbol,
     required double price,
@@ -605,8 +702,7 @@ class PaperPortfolio {
 
     final position = _positions[symbol];
 
-    if (position == null ||
-        quantity > position.quantity) {
+    if (position == null || quantity > position.quantity) {
       return false;
     }
 
@@ -614,18 +710,14 @@ class PaperPortfolio {
     final fee = gross * feeRate;
     final proceeds = gross - fee;
 
-    if (!proceeds.isFinite || proceeds <= 0) {
-      return false;
-    }
+    if (!proceeds.isFinite || proceeds <= 0) return false;
 
-    final pnl =
-        proceeds - position.averageCost * quantity;
+    final pnl = proceeds - position.averageCost * quantity;
 
     _cash += proceeds;
     _realizedPnl += pnl;
 
-    final remaining =
-        position.quantity - quantity;
+    final remaining = position.quantity - quantity;
 
     if (remaining <= 0.000000000001) {
       _positions.remove(symbol);
