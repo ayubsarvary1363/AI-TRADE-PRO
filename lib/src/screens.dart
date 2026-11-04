@@ -182,19 +182,18 @@ class _HomeScreenState extends State<HomeScreen> {
       // بررسی اتصال ارائه‌دهنده قیمت
       try {
         final connectionResults =
-            await _marketHub.checkConnections(
-          MarketType.crypto,
-        );
+    await _marketHub.checkConnections(
+  market: MarketType.crypto,
+);
 
         connected = connectionResults.any(
           (status) => status.connected,
         );
 
-        if (connected) {
-          final quotes = await _marketHub.collectQuotes(
-            MarketType.crypto,
-            _symbol,
-          );
+        final quotes = await _marketHub.collectQuotes(
+  market: MarketType.crypto,
+  symbol: _symbol,
+);
 
           if (quotes.isNotEmpty) {
             latestQuote = quotes.first;
