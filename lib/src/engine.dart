@@ -14,8 +14,6 @@ enum SignalDirection { buy, sell, hold }
 
 enum TradingStyle { fast, mediumTerm, longTerm }
 
-enum MarketType { crypto, forex }
-
 // -------------------- CANDLE --------------------
 
 class Candle {
