@@ -1,4 +1,10 @@
 
+// =====================================================
+// AI TRADE PRO
+// Smart Provider Router - Version 0.5.0
+// Separate market-data routing from order execution
+// =====================================================
+
 enum MarketType {
   crypto,
   forex,
@@ -12,6 +18,13 @@ enum ProviderType {
   broker,
   dataProvider,
 }
+
+enum RoutingPurpose {
+  marketData,
+  orderExecution,
+}
+
+// -------------------- EXCHANGE CANDIDATE --------------------
 
 class ExchangeCandidate {
   final String id;
@@ -27,7 +40,7 @@ class ExchangeCandidate {
   final double ask;
   final double feeRate;
   final double liquidity;
-  final double latencyMs;
+  final int latencyMs;
   final double availableBalance;
 
   const ExchangeCandidate({
@@ -46,105 +59,104 @@ class ExchangeCandidate {
     required this.availableBalance,
   });
 
-  bool get isEligible {
+  bool get hasValidQuote =>
+      bid > 0 &&
+      ask >= bid &&
+      bid.isFinite &&
+      ask.isFinite;
+
+  bool get isEligibleForData {
+    return enabled &&
+        connected &&
+        hasValidQuote &&
+        latencyMs >= 0;
+  }
+
+  bool get isEligibleForTrading {
     return enabled &&
         connected &&
         tradingAllowed &&
-        bid.isFinite &&
-        ask.isFinite &&
-        feeRate.isFinite &&
-        liquidity.isFinite &&
-        latencyMs.isFinite &&
-        availableBalance.isFinite &&
-        bid > 0 &&
-        ask >= bid &&
+        type != ProviderType.dataProvider &&
+        hasValidQuote &&
         feeRate >= 0 &&
-        liquidity > 0 &&
-        latencyMs >= 0 &&
-        availableBalance > 0;
+        feeRate.isFinite &&
+        availableBalance > 0 &&
+        availableBalance.isFinite;
   }
 
-  double get spreadRate {
-    final midpoint = (bid + ask) / 2;
-    if (midpoint <= 0) return double.infinity;
-    return (ask - bid) / midpoint;
+  double get spreadPercent {
+    if (!hasValidQuote) return double.infinity;
+
+    final mid = (bid + ask) / 2;
+    if (mid <= 0) return double.infinity;
+
+    return ((ask - bid) / mid) * 100;
   }
 
   double estimatedCost({
-    required double orderValue,
+    double orderValue = 100,
   }) {
-    if (orderValue <= 0 ||
-        !orderValue.isFinite ||
-        !isEligible) {
+    if (!hasValidQuote ||
+        orderValue <= 0 ||
+        !feeRate.isFinite ||
+        feeRate < 0) {
       return double.infinity;
     }
 
-    final spreadCost = orderValue * spreadRate;
-    final feeCost = orderValue * feeRate;
+    final spreadCost = (ask - bid) / ((ask + bid) / 2);
+    final feeCost = feeRate * 2;
 
-    return spreadCost + feeCost;
+    return orderValue * (spreadCost + feeCost);
   }
 }
 
-class ExchangeRouteResult {
-  final ExchangeCandidate? selected;
-  final List<String> reasons;
-  final String message;
+// -------------------- ROUTING RESULT --------------------
 
-  const ExchangeRouteResult({
+class RoutingResult {
+  final ExchangeCandidate? selected;
+  final List<ExchangeCandidate> ranked;
+  final RoutingPurpose purpose;
+  final String explanation;
+
+  const RoutingResult({
     required this.selected,
-    required this.reasons,
-    required this.message,
+    required this.ranked,
+    required this.purpose,
+    required this.explanation,
   });
 
-  bool get hasRoute => selected != null;
+  bool get hasSelection => selected != null;
 }
+
+// -------------------- SMART ROUTER --------------------
 
 class SmartExchangeRouter {
   const SmartExchangeRouter();
 
-  ExchangeRouteResult selectBest({
-    required MarketType market,
+  RoutingResult route({
     required List<ExchangeCandidate> candidates,
-    required double orderValue,
+    required MarketType market,
+    required RoutingPurpose purpose,
+    double orderValue = 100,
   }) {
-    if (!orderValue.isFinite || orderValue <= 0) {
-      return const ExchangeRouteResult(
-        selected: null,
-        reasons: [],
-        message: 'حجم سفارش معتبر نیست.',
-      );
-    }
+    final matching = candidates.where((candidate) {
+      if (candidate.market != market) return false;
 
-    final eligible = candidates.where((candidate) {
-      return candidate.market == market &&
-          candidate.isEligible &&
-          candidate.availableBalance >= orderValue;
-    }).toList();
-
-    if (eligible.isEmpty) {
-      return const ExchangeRouteResult(
-        selected: null,
-        reasons: [],
-        message: 'هیچ اتصال واجد شرایطی پیدا نشد.',
-      );
-    }
-
-    eligible.sort((a, b) {
-      final costA = a.estimatedCost(
-        orderValue: orderValue,
-      );
-
-      final costB = b.estimatedCost(
-        orderValue: orderValue,
-      );
-
-      final costComparison = costA.compareTo(costB);
-
-      if (costComparison != 0) {
-        return costComparison;
+      if (purpose == RoutingPurpose.marketData) {
+        return candidate.isEligibleForData;
       }
 
+      return candidate.isEligibleForTrading;
+    }).toList();
+
+    matching.sort((a, b) {
+      final costA = a.estimatedCost(orderValue: orderValue);
+      final costB = b.estimatedCost(orderValue: orderValue);
+
+      final costComparison = costA.compareTo(costB);
+      if (costComparison != 0) return costComparison;
+
+      // در هزینه برابر، نقدشوندگی بالاتر اولویت دارد.
       final liquidityComparison =
           b.liquidity.compareTo(a.liquidity);
 
@@ -155,17 +167,50 @@ class SmartExchangeRouter {
       return a.latencyMs.compareTo(b.latencyMs);
     });
 
-    final best = eligible.first;
+    if (matching.isEmpty) {
+      return RoutingResult(
+        selected: null,
+        ranked: const [],
+        purpose: purpose,
+        explanation: purpose == RoutingPurpose.marketData
+            ? 'منبع قیمت معتبر و متصل پیدا نشد'
+            : 'هیچ محل اجرای سفارش واجد شرایط نیست',
+      );
+    }
 
-    return ExchangeRouteResult(
-      selected: best,
-      reasons: [
-        'اتصال فعال و مجاز است.',
-        'موجودی کافی دارد.',
-        'هزینه تخمینی شامل اسپرد و کارمزد بررسی شده است.',
-        'نقدشوندگی و تأخیر اتصال مقایسه شده‌اند.',
-      ],
-      message: 'بهترین اتصال واجد شرایط انتخاب شد.',
+    return RoutingResult(
+      selected: matching.first,
+      ranked: List.unmodifiable(matching),
+      purpose: purpose,
+      explanation: purpose == RoutingPurpose.marketData
+          ? 'منبع قیمت بر اساس هزینه، نقدشوندگی و سرعت انتخاب شد'
+          : 'محل اجرای سفارش بر اساس هزینه، نقدشوندگی و سرعت انتخاب شد',
     );
+  }
+
+  ExchangeCandidate? selectBest({
+    required List<ExchangeCandidate> candidates,
+    required MarketType market,
+    double orderValue = 100,
+  }) {
+    return route(
+      candidates: candidates,
+      market: market,
+      purpose: RoutingPurpose.orderExecution,
+      orderValue: orderValue,
+    ).selected;
+  }
+
+  List<ExchangeCandidate> rankCandidates({
+    required List<ExchangeCandidate> candidates,
+    required MarketType market,
+    double orderValue = 100,
+  }) {
+    return route(
+      candidates: candidates,
+      market: market,
+      purpose: RoutingPurpose.orderExecution,
+      orderValue: orderValue,
+    ).ranked;
   }
 }
