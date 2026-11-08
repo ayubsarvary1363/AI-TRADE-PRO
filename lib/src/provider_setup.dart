@@ -2,12 +2,7 @@
 import 'exchange_router.dart';
 import 'market_provider.dart';
 import 'kraken_provider.dart';
-
-// =====================================================
-// AI TRADE PRO
-// Provider Setup - Version 0.8.0
-// Kraken primary market data
-// =====================================================
+import 'coinbase_provider.dart';
 
 class ProviderSetup {
   ProviderSetup._();
@@ -15,18 +10,17 @@ class ProviderSetup {
   static MarketProviderRegistry createRegistry() {
     final registry = MarketProviderRegistry();
 
-    // منبع فعال دریافت اطلاعات بازار رمزارز
+    // تأمین‌کنندگان عمومی داده بازار رمزارز
     registry.register(KrakenProvider());
+    registry.register(CoinbaseProvider());
 
     return registry;
   }
 
-  // بازارهایی که در این نسخه منبع فعال دارند
   static List<MarketType> get supportedMarkets => [
         MarketType.crypto,
       ];
 
-  // بازارهایی که هنوز اتصال فعال ندارند
   static List<MarketType> get plannedMarkets => [
         MarketType.forex,
         MarketType.stocks,
@@ -39,14 +33,15 @@ class ProviderSetup {
   }
 
   static String marketStatus(MarketType market) {
-    if (market == MarketType.crypto) {
-      return 'دریافت اطلاعات از Kraken';
+    if (isMarketSupported(market)) {
+      return 'فعال';
     }
 
-    if (plannedMarkets.contains(market)) {
-      return 'در انتظار اتصال تأمین‌کننده';
-    }
-
-    return 'پشتیبانی نمی‌شود';
+    return 'در حال توسعه';
   }
+
+  static List<String> get activeProviderNames => [
+        'Kraken',
+        'Coinbase',
+      ];
 }
