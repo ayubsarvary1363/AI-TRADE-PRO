@@ -1,9 +1,9 @@
 
-// =====================================================
-// AI TRADE PRO
-// Smart Provider Router - Version 0.5.0
-// Separate market-data routing from order execution
-// =====================================================
+ // =====================================================
+ // AI TRADE PRO
+ // Smart Provider Router - Version 0.6.0
+ // Market data routing and order execution are separated.
+ // =====================================================
 
 enum MarketType {
   crypto,
@@ -65,29 +65,34 @@ class ExchangeCandidate {
       bid.isFinite &&
       ask.isFinite;
 
-  bool get isEligibleForData {
-    return enabled &&
-        connected &&
-        hasValidQuote &&
-        latencyMs >= 0;
-  }
+  bool get hasValidMetrics =>
+      latencyMs >= 0 &&
+      liquidity >= 0 &&
+      liquidity.isFinite;
 
-  bool get isEligibleForTrading {
-    return enabled &&
-        connected &&
-        tradingAllowed &&
-        type != ProviderType.dataProvider &&
-        hasValidQuote &&
-        feeRate >= 0 &&
-        feeRate.isFinite &&
-        availableBalance > 0 &&
-        availableBalance.isFinite;
-  }
+  bool get isEligibleForData =>
+      enabled &&
+      connected &&
+      hasValidQuote &&
+      hasValidMetrics;
+
+  bool get isEligibleForTrading =>
+      enabled &&
+      connected &&
+      tradingAllowed &&
+      type != ProviderType.dataProvider &&
+      hasValidQuote &&
+      hasValidMetrics &&
+      feeRate >= 0 &&
+      feeRate.isFinite &&
+      availableBalance > 0 &&
+      availableBalance.isFinite;
 
   double get spreadPercent {
     if (!hasValidQuote) return double.infinity;
 
     final mid = (bid + ask) / 2;
+
     if (mid <= 0) return double.infinity;
 
     return ((ask - bid) / mid) * 100;
@@ -98,12 +103,17 @@ class ExchangeCandidate {
   }) {
     if (!hasValidQuote ||
         orderValue <= 0 ||
+        !orderValue.isFinite ||
         !feeRate.isFinite ||
         feeRate < 0) {
       return double.infinity;
     }
 
-    final spreadCost = (ask - bid) / ((ask + bid) / 2);
+    final mid = (bid + ask) / 2;
+
+    if (mid <= 0) return double.infinity;
+
+    final spreadCost = (ask - bid) / mid;
     final feeCost = feeRate * 2;
 
     return orderValue * (spreadCost + feeCost);
@@ -149,23 +159,53 @@ class SmartExchangeRouter {
       return candidate.isEligibleForTrading;
     }).toList();
 
-    matching.sort((a, b) {
-      final costA = a.estimatedCost(orderValue: orderValue);
-      final costB = b.estimatedCost(orderValue: orderValue);
+    if (purpose == RoutingPurpose.marketData) {
+      // رتبه‌بندی منابع داده:
+      // 1. اختلاف خرید و فروش کمتر
+      // 2. سرعت پاسخ بیشتر
+      // 3. نقدشوندگی بیشتر
+      matching.sort((a, b) {
+        final spreadComparison =
+            a.spreadPercent.compareTo(b.spreadPercent);
 
-      final costComparison = costA.compareTo(costB);
-      if (costComparison != 0) return costComparison;
+        if (spreadComparison != 0) {
+          return spreadComparison;
+        }
 
-      // در هزینه برابر، نقدشوندگی بالاتر اولویت دارد.
-      final liquidityComparison =
-          b.liquidity.compareTo(a.liquidity);
+        final latencyComparison =
+            a.latencyMs.compareTo(b.latencyMs);
 
-      if (liquidityComparison != 0) {
-        return liquidityComparison;
-      }
+        if (latencyComparison != 0) {
+          return latencyComparison;
+        }
 
-      return a.latencyMs.compareTo(b.latencyMs);
-    });
+        return b.liquidity.compareTo(a.liquidity);
+      });
+    } else {
+      // رتبه‌بندی محل اجرای سفارش:
+      // 1. هزینه تخمینی کمتر
+      // 2. نقدشوندگی بیشتر
+      // 3. سرعت پاسخ بیشتر
+      matching.sort((a, b) {
+        final costA = a.estimatedCost(orderValue: orderValue);
+        final costB = b.estimatedCost(orderValue: orderValue);
+
+        final costComparison = costA.compareTo(costB);
+
+        if (costComparison != 0) {
+          return costComparison;
+        }
+
+        final liquidityComparison =
+            b.liquidity.compareTo(a.liquidity);
+
+        if (liquidityComparison != 0) {
+          return liquidityComparison;
+        }
+
+        return a.latencyMs.compareTo(b.latencyMs);
+      });
+    }
 
     if (matching.isEmpty) {
       return RoutingResult(
@@ -174,7 +214,7 @@ class SmartExchangeRouter {
         purpose: purpose,
         explanation: purpose == RoutingPurpose.marketData
             ? 'منبع قیمت معتبر و متصل پیدا نشد'
-            : 'هیچ محل اجرای سفارش واجد شرایط نیست',
+            : 'محل اجرای سفارش واجد شرایط نیست',
       );
     }
 
@@ -183,8 +223,8 @@ class SmartExchangeRouter {
       ranked: List.unmodifiable(matching),
       purpose: purpose,
       explanation: purpose == RoutingPurpose.marketData
-          ? 'منبع قیمت بر اساس هزینه، نقدشوندگی و سرعت انتخاب شد'
-          : 'محل اجرای سفارش بر اساس هزینه، نقدشوندگی و سرعت انتخاب شد',
+          ? 'منبع قیمت بر اساس اختلاف قیمت، سرعت و نقدشوندگی انتخاب شد'
+          : 'محل اجرا بر اساس هزینه، نقدشوندگی و سرعت رتبه‌بندی شد',
     );
   }
 
