@@ -24,6 +24,8 @@ class KrakenProvider implements MarketProvider, CandleMarketProvider {
   final Map<String, String> _symbolsByPair = {};
   final Map<String, MarketQuote> _quotes = {};
 
+  String? lastError;
+
   KrakenProvider({
     http.Client? client,
     this.restUrl = 'https://api.kraken.com',
@@ -39,6 +41,7 @@ class KrakenProvider implements MarketProvider, CandleMarketProvider {
   @override
   MarketType get market => MarketType.crypto;
 
+  // نماد مورد استفاده در WebSocket نسخه 2
   String _pair(String symbol) {
     const pairs = {
       'BTCUSDT': 'XBT/USDT',
@@ -54,13 +57,25 @@ class KrakenProvider implements MarketProvider, CandleMarketProvider {
     return pairs[value] ?? value;
   }
 
+  // نماد مورد استفاده در REST کراکن
   String _restPair(String symbol) {
-    return _pair(symbol).replaceAll('/', '');
+    const pairs = {
+      'BTCUSDT': 'XBTUSDT',
+      'ETHUSDT': 'ETHUSDT',
+      'BNBUSDT': 'BNBUSDT',
+      'SOLUSDT': 'SOLUSDT',
+      'XRPUSDT': 'XRPUSDT',
+      'ADAUSDT': 'ADAUSDT',
+      'DOGEUSDT': 'XDGUSDT',
+    };
+
+    final value = symbol.trim().toUpperCase();
+    return pairs[value] ?? _pair(value).replaceAll('/', '');
   }
 
   double _number(dynamic value) {
     if (value is num) return value.toDouble();
-    return double.tryParse(value?.toString() ?? '') ?? 0;
+    return double.tryParse(value?.toString() ?? '') ?? 0.0;
   }
 
   @override
@@ -72,14 +87,24 @@ class KrakenProvider implements MarketProvider, CandleMarketProvider {
           .get(Uri.parse('$restUrl/0/public/SystemStatus'))
           .timeout(const Duration(seconds: 8));
 
-      if (response.statusCode != 200) return false;
+      if (response.statusCode != 200) {
+        lastError = 'خطای اتصال Kraken: HTTP ${response.statusCode}';
+        return false;
+      }
 
       final data = jsonDecode(response.body);
 
-      return data is Map &&
+      if (data is Map &&
           data['error'] is List &&
-          (data['error'] as List).isEmpty;
-    } catch (_) {
+          (data['error'] as List).isEmpty) {
+        lastError = null;
+        return true;
+      }
+
+      lastError = 'پاسخ وضعیت Kraken معتبر نیست';
+      return false;
+    } catch (e) {
+      lastError = 'اتصال به Kraken ناموفق بود: $e';
       return false;
     }
   }
@@ -97,11 +122,15 @@ class KrakenProvider implements MarketProvider, CandleMarketProvider {
 
       _subscription = socket.stream.listen(
         _handleMessage,
-        onError: (_) => _resetSocket(),
+        onError: (error) {
+          lastError = 'خطای WebSocket کراکن: $error';
+          _resetSocket();
+        },
         onDone: _resetSocket,
         cancelOnError: true,
       );
-    } catch (_) {
+    } catch (e) {
+      lastError = 'اتصال WebSocket برقرار نشد: $e';
       _resetSocket();
     } finally {
       _connecting = false;
@@ -114,10 +143,11 @@ class KrakenProvider implements MarketProvider, CandleMarketProvider {
   }
 
   void _subscribe(String symbol) {
-    final pair = _pair(symbol);
+    final normalized = symbol.trim().toUpperCase();
+    final pair = _pair(normalized);
 
-    // نگاشت نماد قبل از دریافت اولین پیام ثبت می‌شود.
-    _symbolsByPair[pair] = symbol.toUpperCase();
+    // نگاشت پیش از دریافت اولین پیام ثبت می‌شود.
+    _symbolsByPair[pair] = normalized;
 
     _connectWebSocket();
 
@@ -133,7 +163,8 @@ class KrakenProvider implements MarketProvider, CandleMarketProvider {
       }));
 
       _subscribed.add(pair);
-    } catch (_) {
+    } catch (e) {
+      lastError = 'ارسال درخواست قیمت زنده ناموفق بود: $e';
       _resetSocket();
     }
   }
@@ -161,7 +192,7 @@ class KrakenProvider implements MarketProvider, CandleMarketProvider {
         final ask = _number(item['ask']);
         final volume = _number(item['volume']);
 
-        if (bid <= 0 || ask < bid) continue;
+        if (bid <= 0 || ask <= 0 || ask < bid) continue;
 
         final quote = MarketQuote(
           providerId: id,
@@ -175,10 +206,11 @@ class KrakenProvider implements MarketProvider, CandleMarketProvider {
 
         if (quote.isValid) {
           _quotes[appSymbol] = quote;
+          lastError = null;
         }
       }
-    } catch (_) {
-      // پیام نامعتبر نادیده گرفته می‌شود.
+    } catch (e) {
+      lastError = 'خواندن پیام قیمت Kraken ناموفق بود: $e';
     }
   }
 
@@ -193,18 +225,24 @@ class KrakenProvider implements MarketProvider, CandleMarketProvider {
       const Duration(seconds: 8),
     );
 
-    if (response.statusCode != 200) return null;
+    if (response.statusCode != 200) {
+      throw StateError('خطای دریافت قیمت Kraken: HTTP ${response.statusCode}');
+    }
 
     final decoded = jsonDecode(response.body);
 
     if (decoded is! Map ||
         decoded['error'] is! List ||
         (decoded['error'] as List).isNotEmpty) {
-      return null;
+      final errors = decoded is Map ? decoded['error'] : null;
+      throw StateError('خطای API کراکن: $errors');
     }
 
     final result = decoded['result'];
-    if (result is! Map || result.isEmpty) return null;
+
+    if (result is! Map || result.isEmpty) {
+      throw StateError('جفت‌ارز ${_restPair(symbol)} در Kraken پیدا نشد');
+    }
 
     final ticker = result.values.first;
     if (ticker is! Map) return null;
@@ -255,8 +293,8 @@ class KrakenProvider implements MarketProvider, CandleMarketProvider {
       return cached;
     }
 
-    // انتظار برای دریافت قیمت زنده
-    for (var i = 0; i < 8; i++) {
+    // فرصت کوتاه برای دریافت قیمت از WebSocket
+    for (var i = 0; i < 4; i++) {
       await Future.delayed(const Duration(milliseconds: 250));
 
       if (_closed) return null;
@@ -275,10 +313,12 @@ class KrakenProvider implements MarketProvider, CandleMarketProvider {
 
       if (quote != null) {
         _quotes[normalized] = quote;
+        lastError = null;
       }
 
       return quote;
-    } catch (_) {
+    } catch (e) {
+      lastError = e.toString();
       return null;
     }
   }
@@ -325,7 +365,9 @@ class KrakenProvider implements MarketProvider, CandleMarketProvider {
     );
 
     if (response.statusCode != 200) {
-      throw StateError('خطای دریافت کندل Kraken: ${response.statusCode}');
+      throw StateError(
+        'خطای دریافت کندل Kraken: HTTP ${response.statusCode}',
+      );
     }
 
     final decoded = jsonDecode(response.body);
@@ -333,7 +375,8 @@ class KrakenProvider implements MarketProvider, CandleMarketProvider {
     if (decoded is! Map ||
         decoded['error'] is! List ||
         (decoded['error'] as List).isNotEmpty) {
-      throw StateError('پاسخ کندل Kraken معتبر نیست');
+      final errors = decoded is Map ? decoded['error'] : null;
+      throw StateError('خطای دریافت کندل از Kraken: $errors');
     }
 
     final result = decoded['result'];
@@ -356,7 +399,6 @@ class KrakenProvider implements MarketProvider, CandleMarketProvider {
       if (item is! List || item.length < 7) continue;
 
       final timestamp = _number(item[0]);
-
       if (timestamp <= 0) continue;
 
       final candle = Candle(
@@ -371,12 +413,14 @@ class KrakenProvider implements MarketProvider, CandleMarketProvider {
         volume: _number(item[6]),
       );
 
-      if (candle.isValid) candles.add(candle);
+      if (candle.isValid) {
+        candles.add(candle);
+      }
     }
 
     candles.sort((a, b) => a.time.compareTo(b.time));
 
-    final safeLimit = limit.clamp(30, 720);
+    final safeLimit = limit.clamp(30, 720).toInt();
 
     if (candles.length > safeLimit) {
       return candles.sublist(candles.length - safeLimit);
@@ -402,6 +446,7 @@ class KrakenProvider implements MarketProvider, CandleMarketProvider {
     _socket = null;
     _quotes.clear();
     _symbolsByPair.clear();
+    _subscribed.clear();
 
     _client.close();
   }
