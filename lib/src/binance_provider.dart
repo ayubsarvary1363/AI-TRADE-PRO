@@ -6,16 +6,16 @@ import 'package:http/http.dart' as http;
 
 import 'exchange_router.dart';
 import 'market_provider.dart';
+import 'engine.dart';
 
 // =====================================================
 // AI TRADE PRO
-// Binance Market Data Provider - Version 0.5.0
-// Public market data only
-// No API key required
-// No real orders
+// Binance Market Data Provider - Version 0.6.0
+// Public quotes and historical candles
+// No API key | No real orders
 // =====================================================
 
-class BinanceProvider implements MarketProvider {
+class BinanceProvider implements MarketProvider, CandleMarketProvider {
   final http.Client _client;
   final String baseUrl;
   final Duration timeout;
@@ -39,8 +39,6 @@ class BinanceProvider implements MarketProvider {
   @override
   MarketType get market => MarketType.crypto;
 
-  bool get isClosed => _closed;
-
   Future<http.Response> _get(Uri uri) async {
     if (_closed) {
       throw StateError('Binance provider is closed');
@@ -52,7 +50,6 @@ class BinanceProvider implements MarketProvider {
       throw StateError('Binance temporarily blocked after rate limit');
     }
 
-    // فاصله کوتاه بین درخواست‌ها برای کاهش فشار روی API
     final previous = _lastRequestTime;
 
     if (previous != null) {
@@ -137,6 +134,79 @@ class BinanceProvider implements MarketProvider {
     } catch (_) {
       return null;
     }
+  }
+
+  // -------------------- HISTORICAL CANDLES --------------------
+
+  @override
+  Future<List<Candle>> fetchCandles(
+    String symbol,
+    String interval, {
+    int limit = 200,
+  }) async {
+    if (_closed || symbol.trim().isEmpty) {
+      return const [];
+    }
+
+    const supportedIntervals = {
+      '1m', '3m', '5m', '15m', '30m',
+      '1h', '2h', '4h', '6h', '8h',
+      '12h', '1d', '3d', '1w', '1M',
+    };
+
+    if (!supportedIntervals.contains(interval)) {
+      throw ArgumentError('Unsupported Binance interval: $interval');
+    }
+
+    final safeLimit = limit.clamp(30, 1000);
+    final normalized = symbol.trim().toUpperCase();
+
+    final uri = Uri.parse(
+      '$baseUrl/api/v3/klines',
+    ).replace(
+      queryParameters: {
+        'symbol': normalized,
+        'interval': interval,
+        'limit': safeLimit.toString(),
+      },
+    );
+
+    final response = await _get(uri);
+    final decoded = jsonDecode(response.body);
+
+    if (decoded is! List) return const [];
+
+    final candles = <Candle>[];
+
+    for (final item in decoded) {
+      if (item is! List || item.length < 6) continue;
+
+      try {
+        final timestamp = int.parse(item[0].toString());
+
+        final candle = Candle(
+          time: DateTime.fromMillisecondsSinceEpoch(
+            timestamp,
+            isUtc: true,
+          ),
+          open: double.parse(item[1].toString()),
+          high: double.parse(item[2].toString()),
+          low: double.parse(item[3].toString()),
+          close: double.parse(item[4].toString()),
+          volume: double.parse(item[5].toString()),
+        );
+
+        if (candle.isValid) {
+          candles.add(candle);
+        }
+      } catch (_) {
+        continue;
+      }
+    }
+
+    candles.sort((a, b) => a.time.compareTo(b.time));
+
+    return candles;
   }
 
   @override
