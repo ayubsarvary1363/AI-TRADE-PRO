@@ -7,7 +7,7 @@ import 'market_provider.dart';
 
 // =====================================================
 // AI TRADE PRO
-// Market Hub Version 0.9.0
+// Market Hub Version 0.9.1
 // Smart Provider Routing + Diagnostics + Fallback
 // Paper Trading Data Layer
 // =====================================================
@@ -127,8 +127,10 @@ class MarketHub {
       return null;
     }
 
+    // تمام پارامترهای route باید نام‌دار باشند.
     final routingResult = router.route(
-      candidates,
+      candidates: candidates,
+      market: market,
       purpose: RoutingPurpose.marketData,
     );
 
