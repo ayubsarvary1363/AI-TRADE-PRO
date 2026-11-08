@@ -1,16 +1,17 @@
 
 import 'dart:async';
-import 'market_provider.dart';
+
 import 'package:flutter/foundation.dart';
 
 import 'engine.dart';
 import 'exchange_router.dart';
 import 'market_hub.dart';
+import 'market_provider.dart';
 
 // =====================================================
 // AI TRADE PRO
-// Trading Controller - Version 0.8.0
-// Paper trading orchestration
+// Trading Controller - Version 0.9.0
+// Improved market data and paper trading safety
 // =====================================================
 
 class TradingController extends ChangeNotifier {
@@ -21,7 +22,6 @@ class TradingController extends ChangeNotifier {
   );
 
   final RiskManager riskManager = RiskManager();
-
   final SignalEngine signalEngine = SignalEngine();
 
   TradingStyle style = TradingStyle.mediumTerm;
@@ -37,12 +37,17 @@ class TradingController extends ChangeNotifier {
   bool _refreshingCandles = false;
   bool _disposed = false;
 
+  bool _quoteHealthy = false;
+  bool _candlesHealthy = false;
+
   MarketQuote? latestQuote;
   TradeSignal? latestSignal;
 
   List<Candle> candles = [];
 
   DateTime? _lastProcessedCandle;
+
+  final Map<String, double> _lastPrices = {};
 
   String status = 'آماده دریافت اطلاعات بازار';
   String? lastError;
@@ -56,7 +61,20 @@ class TradingController extends ChangeNotifier {
   bool get isRefreshing =>
       _refreshingQuote || _refreshingCandles;
 
-  double get currentPrice => latestQuote?.midPrice ?? 0;
+  bool get hasValidPrice {
+    return latestQuote != null &&
+        latestQuote!.isValid &&
+        latestQuote!.isFresh(
+          maximumAge: const Duration(seconds: 15),
+        );
+  }
+
+  bool get hasValidCandles => candles.length >= 30;
+
+  double get currentPrice {
+    if (!hasValidPrice) return 0;
+    return latestQuote!.midPrice;
+  }
 
   double get equity {
     return portfolio.equity(_currentPrices);
@@ -73,8 +91,29 @@ class TradingController extends ChangeNotifier {
   int get tradeCount => portfolio.fills.length;
 
   Map<String, double> get _currentPrices {
-    if (currentPrice <= 0) return {};
-    return {symbol: currentPrice};
+    return Map<String, double>.from(_lastPrices);
+  }
+
+  String get quoteStatus => marketHub.lastQuoteStatus;
+
+  String get candleStatus => marketHub.lastCandleStatus;
+
+  void _updateErrorStatus() {
+    final errors = <String>[];
+
+    if (!_quoteHealthy) {
+      errors.add(marketHub.lastQuoteStatus);
+    }
+
+    if (!_candlesHealthy) {
+      errors.add(marketHub.lastCandleStatus);
+    }
+
+    lastError = errors.isEmpty ? null : errors.join(' | ');
+
+    if (lastError != null) {
+      status = 'دریافت اطلاعات بازار با مشکل مواجه است';
+    }
   }
 
   // -------------------- START --------------------
@@ -85,6 +124,7 @@ class TradingController extends ChangeNotifier {
     _running = true;
     status = 'ربات آزمایشی در حال دریافت اطلاعات است';
     lastError = null;
+
     notifyListeners();
 
     await refreshMarket();
@@ -121,7 +161,12 @@ class TradingController extends ChangeNotifier {
   // -------------------- REFRESH MARKET --------------------
 
   Future<void> refreshMarket() async {
+    if (_disposed) return;
+
     await refreshQuote();
+
+    if (_disposed) return;
+
     await refreshCandles();
   }
 
@@ -140,23 +185,41 @@ class TradingController extends ChangeNotifier {
 
       if (_disposed) return;
 
-      if (quote == null) {
-        status = 'قیمت معتبر دریافت نشد';
-        lastError = 'اتصال یا دریافت قیمت ناموفق بود';
-      } else {
-        latestQuote = quote;
-        lastError = null;
+      if (quote == null ||
+          !quote.isValid ||
+          !quote.isFresh(
+            maximumAge: const Duration(seconds: 15),
+          )) {
+        _quoteHealthy = false;
+        _updateErrorStatus();
+        return;
+      }
 
-        portfolio.updateEquity(_currentPrices);
+      if (quote.symbol.toUpperCase() != symbol.toUpperCase()) {
+        _quoteHealthy = false;
+        marketHub.lastQuoteStatus = 'نماد دریافتی با نماد انتخابی متفاوت است';
+        _updateErrorStatus();
+        return;
+      }
 
-        if (_running) {
-          status = 'قیمت بازار به‌روزرسانی شد';
-        }
+      latestQuote = quote;
+
+      _lastPrices[symbol] = quote.midPrice;
+
+      _quoteHealthy = true;
+
+      portfolio.updateEquity(_currentPrices);
+
+      _updateErrorStatus();
+
+      if (lastError == null && _running) {
+        status = 'قیمت بازار به‌روزرسانی شد';
       }
     } catch (error) {
       if (!_disposed) {
-        lastError = error.toString();
-        status = 'خطا در دریافت قیمت';
+        _quoteHealthy = false;
+        marketHub.lastQuoteStatus = 'خطای قیمت: $error';
+        _updateErrorStatus();
       }
     } finally {
       _refreshingQuote = false;
@@ -183,24 +246,34 @@ class TradingController extends ChangeNotifier {
       if (_disposed) return;
 
       if (result.length < 30) {
-        status = 'برای تحلیل، کندل کافی دریافت نشد';
+        _candlesHealthy = false;
+        _updateErrorStatus();
         return;
       }
 
       candles = result;
+
+      _candlesHealthy = true;
 
       latestSignal = signalEngine.analyze(
         candles,
         style: style,
       );
 
-      _processNewSignal();
+      _updateErrorStatus();
 
-      lastError = null;
+      if (_quoteHealthy && _candlesHealthy) {
+        _processNewSignal();
+
+        if (lastError == null && !_running) {
+          status = 'اطلاعات بازار دریافت شد';
+        }
+      }
     } catch (error) {
       if (!_disposed) {
-        lastError = error.toString();
-        status = 'خطا در دریافت کندل‌ها';
+        _candlesHealthy = false;
+        marketHub.lastCandleStatus = 'خطای دریافت کندل: $error';
+        _updateErrorStatus();
       }
     } finally {
       _refreshingCandles = false;
@@ -212,14 +285,17 @@ class TradingController extends ChangeNotifier {
   // -------------------- PAPER EXECUTION --------------------
 
   void _processNewSignal() {
-    if (!_running || latestSignal == null || candles.isEmpty) {
+    if (!_running ||
+        latestSignal == null ||
+        candles.isEmpty ||
+        !hasValidPrice ||
+        !hasValidCandles) {
       return;
     }
 
     final signal = latestSignal!;
     final candleTime = candles.last.time;
 
-    // از اجرای چندباره یک سیگنال روی یک کندل جلوگیری می‌شود.
     if (_lastProcessedCandle == candleTime) return;
 
     _lastProcessedCandle = candleTime;
@@ -231,7 +307,9 @@ class TradingController extends ChangeNotifier {
       return;
     }
 
-    final currentEquity = portfolio.updateEquity(_currentPrices);
+    final currentEquity = portfolio.updateEquity(
+      _currentPrices,
+    );
 
     final canTrade = riskManager.canTrade(
       currentEquity: currentEquity,
@@ -253,12 +331,23 @@ class TradingController extends ChangeNotifier {
   }
 
   void _executePaperBuy(TradeSignal signal) {
+    if (!hasValidPrice) {
+      status = 'قیمت معتبر برای خرید وجود ندارد';
+      return;
+    }
+
     if (portfolio.positions.containsKey(symbol)) {
       status = 'برای این نماد موقعیت خرید باز وجود دارد';
       return;
     }
 
-    final price = currentPrice;
+    final price = latestQuote!.ask;
+
+    if (price <= 0) {
+      status = 'قیمت خرید معتبر نیست';
+      return;
+    }
+
     final stopPrice = price * 0.98;
 
     final quantity = riskManager.calculatePositionSize(
@@ -285,6 +374,11 @@ class TradingController extends ChangeNotifier {
   }
 
   void _executePaperSell() {
+    if (!hasValidPrice) {
+      status = 'قیمت معتبر برای فروش وجود ندارد';
+      return;
+    }
+
     final position = portfolio.positions[symbol];
 
     if (position == null) {
@@ -292,9 +386,16 @@ class TradingController extends ChangeNotifier {
       return;
     }
 
+    final price = latestQuote!.bid;
+
+    if (price <= 0) {
+      status = 'قیمت فروش معتبر نیست';
+      return;
+    }
+
     final success = portfolio.sell(
       symbol: symbol,
-      price: currentPrice,
+      price: price,
       quantity: position.quantity,
     );
 
@@ -308,11 +409,24 @@ class TradingController extends ChangeNotifier {
   void changeSymbol(String value) {
     if (_disposed || value.trim().isEmpty) return;
 
-    symbol = value.trim().toUpperCase();
+    final nextSymbol = value.trim().toUpperCase();
+
+    if (symbol == nextSymbol) return;
+
+    symbol = nextSymbol;
+
     latestQuote = null;
     latestSignal = null;
     candles = [];
+
+    _quoteHealthy = false;
+    _candlesHealthy = false;
+
     _lastProcessedCandle = null;
+
+    status = 'در حال دریافت اطلاعات $symbol';
+
+    _updateErrorStatus();
 
     notifyListeners();
 
@@ -325,8 +439,16 @@ class TradingController extends ChangeNotifier {
     if (_disposed || interval == value) return;
 
     interval = value;
+
     latestSignal = null;
+    candles = [];
+
+    _candlesHealthy = false;
     _lastProcessedCandle = null;
+
+    status = 'در حال دریافت کندل‌های $interval';
+
+    _updateErrorStatus();
 
     notifyListeners();
 
@@ -361,7 +483,13 @@ class TradingController extends ChangeNotifier {
     latestSignal = null;
     candles = [];
 
+    _lastPrices.clear();
+
+    _quoteHealthy = false;
+    _candlesHealthy = false;
+
     _lastProcessedCandle = null;
+
     lastError = null;
     status = 'حساب آزمایشی بازنشانی شد';
 
