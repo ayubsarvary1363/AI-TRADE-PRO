@@ -255,7 +255,7 @@ class RiskManager {
     // سقف ارزش معامله: ۲۵ درصد موجودی
     final maximumQuantity = (equity * 0.25) / entryPrice;
 
-    return min(quantity, maximumQuantity);
+    return min(quantity, maximumQuantity).toDouble();
   }
 
   bool canTrade({
