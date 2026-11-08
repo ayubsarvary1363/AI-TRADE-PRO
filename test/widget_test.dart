@@ -1,5 +1,5 @@
 import 'package:flutter_test/flutter_test.dart';
-import 'package:ai_trade_pro/main.dart';
+import 'package:ai_trade_pro/src/app.dart';
 
 void main() {
   testWidgets('shows app title and paper balance', (tester) async {
