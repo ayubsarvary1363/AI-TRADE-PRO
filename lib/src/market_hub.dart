@@ -7,9 +7,22 @@ import 'market_provider.dart';
 
 // =====================================================
 // AI TRADE PRO
-// Market Hub Version 0.8.0
-// Multi-provider + diagnostics + fallback
+// Market Hub Version 0.9.0
+// Smart routing + multi-provider + diagnostics
+// Paper trading data only
 // =====================================================
+
+class _QuoteResult {
+  final MarketQuote quote;
+  final int latencyMs;
+  final String providerName;
+
+  const _QuoteResult({
+    required this.quote,
+    required this.latencyMs,
+    required this.providerName,
+  });
+}
 
 class MarketHub {
   final MarketProviderRegistry registry;
@@ -17,6 +30,8 @@ class MarketHub {
   final Duration quoteTimeout;
   final Duration candleTimeout;
   final Duration maximumQuoteAge;
+
+  final SmartExchangeRouter router = const SmartExchangeRouter();
 
   bool _disposed = false;
 
@@ -37,11 +52,11 @@ class MarketHub {
 
   bool get isDisposed => _disposed;
 
-  // -------------------- QUOTES --------------------
+  // -------------------- QUOTE COLLECTION --------------------
 
-  Future<List<MarketQuote>> collectQuotes(
+  Future<List<_QuoteResult>> _collectQuoteResults(
     String symbol, {
-    MarketType market = MarketType.crypto,
+    required MarketType market,
   }) async {
     if (_disposed || symbol.trim().isEmpty) {
       return const [];
@@ -55,10 +70,14 @@ class MarketHub {
     }
 
     final futures = providers.map((provider) async {
+      final stopwatch = Stopwatch()..start();
+
       try {
         final quote = await provider
             .fetchQuote(symbol)
             .timeout(quoteTimeout);
+
+        stopwatch.stop();
 
         if (quote == null) {
           providerErrors[provider.id] = 'قیمت دریافت نشد';
@@ -75,11 +94,18 @@ class MarketHub {
         }
 
         providerErrors.remove(provider.id);
-        return quote;
+
+        return _QuoteResult(
+          quote: quote,
+          latencyMs: stopwatch.elapsedMilliseconds,
+          providerName: provider.name,
+        );
       } on TimeoutException {
+        stopwatch.stop();
         providerErrors[provider.id] = 'مهلت دریافت قیمت تمام شد';
         return null;
       } catch (error) {
+        stopwatch.stop();
         providerErrors[provider.id] = error.toString();
         return null;
       }
@@ -89,18 +115,89 @@ class MarketHub {
 
     if (_disposed) return const [];
 
-    final quotes = results.whereType<MarketQuote>().toList()
-      ..sort((a, b) => a.spreadPercent.compareTo(b.spreadPercent));
+    return results.whereType<_QuoteResult>().toList();
+  }
 
-    if (quotes.isEmpty) {
+  // -------------------- SMART ROUTING --------------------
+
+  Future<List<MarketQuote>> collectQuotes(
+    String symbol, {
+    MarketType market = MarketType.crypto,
+  }) async {
+    final results = await _collectQuoteResults(
+      symbol,
+      market: market,
+    );
+
+    if (_disposed || results.isEmpty) {
       lastQuoteStatus = 'دریافت قیمت از تمام منابع ناموفق بود';
       return const [];
     }
 
-    lastQuoteStatus = 'قیمت معتبر از ${quotes.first.providerId} دریافت شد';
+    final candidates = results.map((item) {
+      final quote = item.quote;
+
+      final safeVolume = quote.volume.isFinite && quote.volume > 0
+          ? quote.volume
+          : 0.0;
+
+      return ExchangeCandidate(
+        id: quote.providerId,
+        name: item.providerName,
+        market: quote.market,
+        type: ProviderType.exchange,
+        enabled: true,
+        connected: true,
+        tradingAllowed: false,
+        bid: quote.bid,
+        ask: quote.ask,
+        feeRate: 0,
+        liquidity: safeVolume,
+        latencyMs: item.latencyMs,
+        availableBalance: 0,
+      );
+    }).toList();
+
+    final routing = router.route(
+      candidates,
+      purpose: RoutingPurpose.marketData,
+    );
+
+    if (_disposed) return const [];
+
+    final quoteByProvider = {
+      for (final item in results)
+        item.quote.providerId: item.quote,
+    };
+
+    final rankedQuotes = <MarketQuote>[];
+
+    for (final candidate in routing.ranked) {
+      final quote = quoteByProvider[candidate.id];
+
+      if (quote != null) {
+        rankedQuotes.add(quote);
+      }
+    }
+
+    if (rankedQuotes.isEmpty) {
+      lastQuoteStatus = 'مسیریاب هوشمند منبع قیمت معتبری انتخاب نکرد';
+      return const [];
+    }
+
+    final selected = routing.selected;
+
+    if (selected == null) {
+      lastQuoteStatus = 'انتخاب منبع قیمت ناموفق بود';
+      return const [];
+    }
+
+    lastQuoteStatus =
+        'منبع هوشمند انتخاب‌شده: ${selected.name}';
+
     lastSuccessfulQuote = DateTime.now();
 
-    return quotes;
+    return rankedQuotes;
   }
 
   Future<MarketQuote?> getBestQuote(
@@ -168,7 +265,8 @@ class MarketHub {
         providerErrors.remove(marketProvider.id);
         return valid;
       } on TimeoutException {
-        providerErrors[marketProvider.id] = 'مهلت دریافت کندل تمام شد';
+        providerErrors[marketProvider.id] =
+            'مهلت دریافت کندل تمام شد';
         return <Candle>[];
       } catch (error) {
         providerErrors[marketProvider.id] = error.toString();
