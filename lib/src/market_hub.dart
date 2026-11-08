@@ -3,11 +3,12 @@ import 'dart:async';
 
 import 'exchange_router.dart';
 import 'market_provider.dart';
+import 'engine.dart';
 
 // =====================================================
 // AI TRADE PRO
-// Multi-Provider Market Hub - Version 0.5.0
-// Parallel market data collection
+// Multi-Provider Market Hub - Version 0.7.0
+// Quotes + Historical Candles
 // =====================================================
 
 class MarketHub {
@@ -38,8 +39,6 @@ class MarketHub {
 
     final providers = registry.providersFor(market);
 
-    if (providers.isEmpty) return const [];
-
     final futures = providers.map((provider) async {
       try {
         final quote = await provider
@@ -66,10 +65,7 @@ class MarketHub {
     if (_disposed) return const [];
 
     return results.whereType<MarketQuote>().toList()
-      ..sort((a, b) {
-        // در این مرحله قیمت‌های معتبر با اسپرد کمتر اولویت دارند.
-        return a.spreadPercent.compareTo(b.spreadPercent);
-      });
+      ..sort((a, b) => a.spreadPercent.compareTo(b.spreadPercent));
   }
 
   // -------------------- BEST QUOTE --------------------
@@ -86,6 +82,58 @@ class MarketHub {
     if (quotes.isEmpty) return null;
 
     return quotes.first;
+  }
+
+  // -------------------- FETCH CANDLES --------------------
+
+  Future<List<Candle>> fetchCandles(
+    String symbol,
+    String interval, {
+    MarketType market = MarketType.crypto,
+    int limit = 200,
+  }) async {
+    if (_disposed || symbol.trim().isEmpty) {
+      return const [];
+    }
+
+    final providers = registry.providersFor(market)
+        .where((provider) => provider is CandleMarketProvider)
+        .cast<CandleMarketProvider>()
+        .toList();
+
+    if (providers.isEmpty) return const [];
+
+    final futures = providers.map((provider) async {
+      try {
+        final candles = await provider
+            .fetchCandles(
+              symbol,
+              interval,
+              limit: limit,
+            )
+            .timeout(requestTimeout);
+
+        final valid = candles.where((candle) => candle.isValid).toList()
+          ..sort((a, b) => a.time.compareTo(b.time));
+
+        if (valid.length < 30) return <Candle>[];
+
+        return valid;
+      } catch (_) {
+        return <Candle>[];
+      }
+    });
+
+    final results = await Future.wait(futures);
+
+    if (_disposed) return const [];
+
+    // بهترین پاسخ: بیشترین تعداد کندل معتبر
+    results.sort((a, b) => b.length.compareTo(a.length));
+
+    if (results.isEmpty) return const [];
+
+    return results.first;
   }
 
   // -------------------- CONNECTION STATUS --------------------
