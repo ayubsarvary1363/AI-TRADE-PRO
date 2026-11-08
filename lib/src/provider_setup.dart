@@ -1,33 +1,32 @@
 
 import 'exchange_router.dart';
 import 'market_provider.dart';
-import 'binance_provider.dart';
+import 'kraken_provider.dart';
 
 // =====================================================
 // AI TRADE PRO
-// Provider Setup - Version 0.5.0
+// Provider Setup - Version 0.8.0
+// Kraken primary market data
 // =====================================================
 
 class ProviderSetup {
   ProviderSetup._();
 
-  // ساخت فهرست منابع داده فعال
   static MarketProviderRegistry createRegistry() {
     final registry = MarketProviderRegistry();
 
-    // دریافت داده عمومی بازار رمزارز
-    registry.register(BinanceProvider());
+    // منبع فعال دریافت اطلاعات بازار رمزارز
+    registry.register(KrakenProvider());
 
     return registry;
   }
 
-  // بازارهایی که در این نسخه واقعاً منبع داده دارند
+  // بازارهایی که در این نسخه منبع فعال دارند
   static List<MarketType> get supportedMarkets => [
         MarketType.crypto,
       ];
 
-  // بازارهایی که در معماری آینده در نظر گرفته شده‌اند
-  // این فهرست به معنی اتصال فعال نیست.
+  // بازارهایی که هنوز اتصال فعال ندارند
   static List<MarketType> get plannedMarkets => [
         MarketType.forex,
         MarketType.stocks,
@@ -40,12 +39,12 @@ class ProviderSetup {
   }
 
   static String marketStatus(MarketType market) {
-    if (supportedMarkets.contains(market)) {
-      return 'منبع داده ثبت شده';
+    if (market == MarketType.crypto) {
+      return 'دریافت اطلاعات از Kraken';
     }
 
     if (plannedMarkets.contains(market)) {
-      return 'در انتظار پیاده‌سازی اتصال';
+      return 'در انتظار اتصال تأمین‌کننده';
     }
 
     return 'پشتیبانی نمی‌شود';
