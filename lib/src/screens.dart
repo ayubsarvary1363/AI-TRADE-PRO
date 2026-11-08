@@ -198,7 +198,6 @@ class _HomeScreenState extends State<HomeScreen> {
           if (quotes.isNotEmpty) {
             latestQuote = quotes.first;
           }
-        }
       } catch (_) {
         connected = false;
         latestQuote = null;
