@@ -1,6 +1,6 @@
 
 import 'dart:async';
-
+import 'market_provider.dart';
 import 'package:flutter/foundation.dart';
 
 import 'engine.dart';
