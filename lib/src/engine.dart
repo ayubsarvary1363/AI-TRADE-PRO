@@ -1,23 +1,22 @@
 
 import 'dart:math';
 
-// ============================================================
-// AI TRADE PRO - Trading Engine 0.5.0
-// Secure architecture - Paper trading enabled
-// Live order execution intentionally disabled until integration
-// ============================================================
+// =====================================================
+// AI TRADE PRO
+// Trading Engine Foundation - Version 0.5.0
+// Paper trading enabled | Live trading locked
+// Spot only | No leverage | No short selling
+// =====================================================
 
 enum TradeMode { paper, live }
 
 enum SignalDirection { buy, sell, hold }
 
-enum TradingStyle { fast, medium, longTerm }
+enum TradingStyle { fast, mediumTerm, longTerm }
 
-enum MarketType { crypto, forex, stocks, commodities, indices }
+enum MarketType { crypto, forex }
 
-enum OrderSide { buy, sell }
-
-// ======================== CANDLE ==============================
+// -------------------- CANDLE --------------------
 
 class Candle {
   final DateTime time;
@@ -33,46 +32,46 @@ class Candle {
     required this.high,
     required this.low,
     required this.close,
-    required this.volume,
+    this.volume = 0,
   });
 
   bool get isValid =>
-      open.isFinite &&
-      high.isFinite &&
-      low.isFinite &&
-      close.isFinite &&
-      volume.isFinite &&
       open > 0 &&
+      high > 0 &&
+      low > 0 &&
+      close > 0 &&
       high >= low &&
       high >= open &&
       high >= close &&
       low <= open &&
       low <= close &&
-      close > 0 &&
-      volume >= 0;
+      volume >= 0 &&
+      open.isFinite &&
+      high.isFinite &&
+      low.isFinite &&
+      close.isFinite &&
+      volume.isFinite;
 }
 
-// ======================== SIGNAL ==============================
+// -------------------- SIGNAL --------------------
 
 class TradeSignal {
-  final String symbol;
   final SignalDirection direction;
   final double confidence;
   final double price;
-  final DateTime createdAt;
   final List<String> reasons;
+  final DateTime createdAt;
 
   const TradeSignal({
-    required this.symbol,
     required this.direction,
     required this.confidence,
     required this.price,
-    required this.createdAt,
     required this.reasons,
+    required this.createdAt,
   });
 }
 
-// ===================== TECHNICAL ANALYSIS =====================
+// -------------------- INDICATORS --------------------
 
 class SignalEngine {
   double _ema(List<double> values, int period) {
@@ -113,118 +112,119 @@ class SignalEngine {
     return 100 - (100 / (1 + rs));
   }
 
-  TradeSignal analyze({
-    required String symbol,
-    required List<Candle> candles,
-    TradingStyle style = TradingStyle.medium,
+  TradeSignal analyze(
+    List<Candle> candles, {
+    TradingStyle style = TradingStyle.mediumTerm,
   }) {
     final valid = candles.where((c) => c.isValid).toList()
       ..sort((a, b) => a.time.compareTo(b.time));
 
-    final requiredCount = style == TradingStyle.fast ? 30 : 50;
-
-    if (valid.length < requiredCount) {
-      return _hold(symbol, valid.isEmpty ? 0 : valid.last.close,
-          'داده کافی برای تحلیل وجود ندارد.');
+    if (valid.length < 30) {
+      return TradeSignal(
+        direction: SignalDirection.hold,
+        confidence: 0,
+        price: valid.isEmpty ? 0 : valid.last.close,
+        reasons: ['داده کافی برای تحلیل وجود ندارد'],
+        createdAt: DateTime.now(),
+      );
     }
 
-    final closes = valid.map((c) => c.close).toList();
-    final price = closes.last;
+    final prices = valid.map((c) => c.close).toList();
 
-    if (price <= 0 || !price.isFinite) {
-      return _hold(symbol, 0, 'قیمت معتبر نیست.');
-    }
+    final ema9 = _ema(prices, 9);
+    final ema21 = _ema(prices, 21);
+    final ema26 = _ema(prices, 26);
+    final ema12 = _ema(prices, 12);
+    final rsi = _rsi(prices, 14);
 
-    final shortPeriod = style == TradingStyle.fast ? 5 : 9;
-    final longPeriod = style == TradingStyle.fast ? 13 : 21;
-
-    final fastEma = _ema(closes, shortPeriod);
-    final slowEma = _ema(closes, longPeriod);
-    final rsi = _rsi(closes, 14);
-
-    final ema12 = _ema(closes, 12);
-    final ema26 = _ema(closes, 26);
     final macd = ema12 - ema26;
+    final previousMacd = _ema(prices.sublist(0, prices.length - 1), 12) -
+        _ema(prices.sublist(0, prices.length - 1), 26);
 
-    final recentVolume = valid.skip(valid.length - 10)
-        .map((c) => c.volume)
-        .reduce((a, b) => a + b) / 10;
-
-    final previousVolume = valid.skip(valid.length - 20)
-        .take(10)
-        .map((c) => c.volume)
-        .reduce((a, b) => a + b) / 10;
+    final last = valid.last;
+    final previous = valid[valid.length - 2];
 
     int score = 0;
     final reasons = <String>[];
 
-    if (fastEma > slowEma) {
+    if (ema9 > ema21) {
       score++;
-      reasons.add('روند میانگین‌های متحرک صعودی است.');
-    } else if (fastEma < slowEma) {
+      reasons.add('روند کوتاه‌مدت صعودی است');
+    } else if (ema9 < ema21) {
       score--;
-      reasons.add('روند میانگین‌های متحرک نزولی است.');
+      reasons.add('روند کوتاه‌مدت نزولی است');
     }
 
-    if (rsi < 30) {
+    if (last.close > ema21) {
       score++;
-      reasons.add('شاخص RSI در محدوده اشباع فروش است.');
-    } else if (rsi > 70) {
+      reasons.add('قیمت بالاتر از میانگین ۲۱ دوره است');
+    } else {
       score--;
-      reasons.add('شاخص RSI در محدوده اشباع خرید است.');
+      reasons.add('قیمت پایین‌تر از میانگین ۲۱ دوره است');
     }
 
-    if (macd > 0) {
+    if (macd > previousMacd) {
       score++;
-      reasons.add('مومنتوم MACD مثبت است.');
-    } else if (macd < 0) {
+      reasons.add('مومنتوم MACD در حال تقویت است');
+    } else {
       score--;
-      reasons.add('مومنتوم MACD منفی است.');
+      reasons.add('مومنتوم MACD در حال تضعیف است');
     }
 
-    if (recentVolume > previousVolume && recentVolume > 0) {
-      reasons.add('حجم معاملات نسبت به دوره قبل افزایش یافته است.');
+    if (rsi >= 50 && rsi < 70) {
+      score++;
+      reasons.add('RSI وضعیت صعودی متعادل دارد');
+    } else if (rsi < 50 && rsi > 30) {
+      score--;
+      reasons.add('RSI وضعیت نزولی دارد');
+    } else if (rsi >= 70) {
+      reasons.add('RSI در محدوده اشباع خرید است');
+    } else {
+      reasons.add('RSI در محدوده اشباع فروش است');
     }
 
-    final direction = score >= 2
-        ? SignalDirection.buy
-        : score <= -2
-            ? SignalDirection.sell
-            : SignalDirection.hold;
+    if (last.close > previous.close) {
+      score++;
+      reasons.add('آخرین کندل نسبت به کندل قبل صعودی است');
+    } else if (last.close < previous.close) {
+      score--;
+      reasons.add('آخرین کندل نسبت به کندل قبل نزولی است');
+    }
 
-    final confidence = (50 + score.abs() * 12.0).clamp(0.0, 90.0);
+    final threshold = switch (style) {
+      TradingStyle.fast => 2,
+      TradingStyle.mediumTerm => 3,
+      TradingStyle.longTerm => 4,
+    };
+
+    SignalDirection direction = SignalDirection.hold;
+
+    if (score >= threshold) {
+      direction = SignalDirection.buy;
+    } else if (score <= -threshold) {
+      direction = SignalDirection.sell;
+    }
+
+    final confidence = direction == SignalDirection.hold
+        ? 0.0
+        : min(0.95, 0.50 + (score.abs() * 0.07));
 
     return TradeSignal(
-      symbol: symbol,
       direction: direction,
       confidence: confidence,
-      price: price,
-      createdAt: DateTime.now().toUtc(),
+      price: last.close,
       reasons: reasons,
-    );
-  }
-
-  TradeSignal _hold(String symbol, double price, String reason) {
-    return TradeSignal(
-      symbol: symbol,
-      direction: SignalDirection.hold,
-      confidence: 0,
-      price: price,
-      createdAt: DateTime.now().toUtc(),
-      reasons: [reason],
+      createdAt: DateTime.now(),
     );
   }
 }
 
-// ======================== RISK MANAGER ========================
+// -------------------- RISK MANAGEMENT --------------------
 
 class RiskManager {
   final double riskPerTrade;
   final double maxDailyLoss;
   final double maxDrawdown;
-
-  double dailyStartEquity = 50;
-  double peakEquity = 50;
 
   RiskManager({
     this.riskPerTrade = 0.005,
@@ -232,68 +232,53 @@ class RiskManager {
     this.maxDrawdown = 0.05,
   });
 
-  void updateEquity(double equity) {
-    if (!equity.isFinite || equity < 0) return;
-
-    if (equity > peakEquity) {
-      peakEquity = equity;
-    }
-  }
-
-  void resetDaily(double equity) {
-    if (equity.isFinite && equity > 0) {
-      dailyStartEquity = equity;
-    }
-  }
-
-  bool get dailyLossReached =>
-      dailyStartEquity > 0 &&
-      (dailyStartEquity - peakEquity) / dailyStartEquity >= maxDailyLoss;
-
-  bool drawdownReached(double equity) {
-    if (peakEquity <= 0 || !equity.isFinite) return true;
-
-    return (peakEquity - equity) / peakEquity >= maxDrawdown;
-  }
-
-  double calculateQuantity({
+  double calculatePositionSize({
     required double equity,
     required double entryPrice,
     required double stopPrice,
     required double confidence,
   }) {
-    if (!equity.isFinite ||
-        !entryPrice.isFinite ||
-        !stopPrice.isFinite ||
-        !confidence.isFinite ||
-        equity <= 0 ||
+    if (equity <= 0 ||
         entryPrice <= 0 ||
         stopPrice <= 0 ||
         stopPrice >= entryPrice ||
-        confidence < 60) {
+        confidence <= 0) {
       return 0;
     }
 
     final riskAmount = equity * riskPerTrade;
     final riskPerUnit = entryPrice - stopPrice;
 
-    if (riskPerUnit <= 0) return 0;
+    final confidenceFactor = confidence.clamp(0.0, 1.0);
+    final quantity = (riskAmount / riskPerUnit) * confidenceFactor;
 
-    final confidenceFactor = (confidence / 90).clamp(0.0, 1.0);
-    final riskAdjusted = riskAmount * confidenceFactor;
+    // سقف ارزش معامله: ۲۵ درصد موجودی
+    final maximumQuantity = (equity * 0.25) / entryPrice;
 
-    return riskAdjusted / riskPerUnit;
+    return min(quantity, maximumQuantity);
   }
 
-  bool canTrade(double equity) {
-    if (!equity.isFinite || equity <= 0) return false;
-    if (dailyLossReached) return false;
-    if (drawdownReached(equity)) return false;
-    return true;
+  bool canTrade({
+    required double currentEquity,
+    required double dayStartingEquity,
+    required double peakEquity,
+  }) {
+    if (currentEquity <= 0 ||
+        dayStartingEquity <= 0 ||
+        peakEquity <= 0) {
+      return false;
+    }
+
+    final dailyLoss =
+        (dayStartingEquity - currentEquity) / dayStartingEquity;
+
+    final drawdown = (peakEquity - currentEquity) / peakEquity;
+
+    return dailyLoss < maxDailyLoss && drawdown < maxDrawdown;
   }
 }
 
-// ======================== PAPER POSITION ======================
+// -------------------- POSITION --------------------
 
 class PaperPosition {
   final String symbol;
@@ -307,13 +292,17 @@ class PaperPosition {
   });
 
   double marketValue(double price) => quantity * price;
+
+  double unrealizedPnl(double price) =>
+      (price - averageEntryPrice) * quantity;
 }
 
-// ======================== PAPER FILL ==========================
+// -------------------- TRADE RECORD --------------------
 
 class PaperFill {
+  final String id;
   final String symbol;
-  final OrderSide side;
+  final SignalDirection side;
   final double price;
   final double quantity;
   final double fee;
@@ -321,6 +310,7 @@ class PaperFill {
   final DateTime time;
 
   const PaperFill({
+    required this.id,
     required this.symbol,
     required this.side,
     required this.price,
@@ -331,56 +321,77 @@ class PaperFill {
   });
 }
 
-// ======================== PAPER PORTFOLIO =====================
+// -------------------- PAPER PORTFOLIO --------------------
 
 class PaperPortfolio {
   final double initialUsdt;
   final double feeRate;
 
-  double cash;
-  double realizedPnl = 0;
+  double cashUsdt;
   double peakEquity;
+  double dayStartingEquity;
+  DateTime _currentDay;
+
   final Map<String, PaperPosition> positions = {};
   final List<PaperFill> fills = [];
 
   PaperPortfolio({
     this.initialUsdt = 50,
     this.feeRate = 0.001,
-  })  : cash = initialUsdt,
-        peakEquity = initialUsdt;
+  })  : cashUsdt = initialUsdt,
+        peakEquity = initialUsdt,
+        dayStartingEquity = initialUsdt,
+        _currentDay = DateTime.now();
+
+  double get realizedPnl =>
+      fills.fold(0.0, (sum, fill) => sum + fill.realizedPnl);
 
   double get totalFees =>
-      fills.fold(0.0, (total, fill) => total + fill.fee);
-
-  double get totalRealizedPnl => realizedPnl;
-
-  double get equity {
-    double total = cash;
-
-    for (final position in positions.values) {
-      total += position.quantity * position.averageEntryPrice;
-    }
-
-    if (equity > peakEquity) {
-      peakEquity = equity;
-    }
-
-    return total;
-  }
+      fills.fold(0.0, (sum, fill) => sum + fill.fee);
 
   double unrealizedPnl(Map<String, double> prices) {
     double result = 0;
 
-    for (final position in positions.values) {
-      final price = prices[position.symbol];
-
-      if (price == null || !price.isFinite || price <= 0) continue;
-
-      result +=
-          (price - position.averageEntryPrice) * position.quantity;
+    for (final entry in positions.entries) {
+      final price = prices[entry.key];
+      if (price != null && price > 0) {
+        result += entry.value.unrealizedPnl(price);
+      }
     }
 
     return result;
+  }
+
+  double equity(Map<String, double> prices) {
+    double result = cashUsdt;
+
+    for (final entry in positions.entries) {
+      final price = prices[entry.key];
+      if (price != null && price > 0) {
+        result += entry.value.marketValue(price);
+      }
+    }
+
+    return result;
+  }
+
+  double updateEquity(Map<String, double> prices) {
+    final value = equity(prices);
+
+    if (value > peakEquity) {
+      peakEquity = value;
+    }
+
+    final now = DateTime.now();
+
+    if (now.year != _currentDay.year ||
+        now.month != _currentDay.month ||
+        now.day != _currentDay.day) {
+      _currentDay = now;
+      dayStartingEquity = value;
+    }
+
+    return value;
   }
 
   bool buy({
@@ -388,19 +399,21 @@ class PaperPortfolio {
     required double price,
     required double quantity,
   }) {
-    if (symbol.trim().isEmpty ||
-        !price.isFinite ||
-        !quantity.isFinite ||
+    if (symbol.isEmpty ||
         price <= 0 ||
-        quantity <= 0) {
+        quantity <= 0 ||
+        !price.isFinite ||
+        !quantity.isFinite) {
       return false;
     }
 
-    final value = price * quantity;
-    final fee = value * feeRate;
-    final totalCost = value + fee;
+    final cost = price * quantity;
+    final fee = cost * feeRate;
+    final total = cost + fee;
 
-    if (!totalCost.isFinite || totalCost > cash) return false;
+    if (total > cashUsdt) return false;
+
+    cashUsdt -= total;
 
     final existing = positions[symbol];
 
@@ -408,27 +421,25 @@ class PaperPortfolio {
       positions[symbol] = PaperPosition(
         symbol: symbol,
         quantity: quantity,
-        averageEntryPrice: totalCost / quantity,
+        averageEntryPrice: (cost + fee) / quantity,
       );
     } else {
       final newQuantity = existing.quantity + quantity;
-      final oldCost = existing.quantity * existing.averageEntryPrice;
-
       existing.averageEntryPrice =
-          (oldCost + totalCost) / newQuantity;
+          ((existing.averageEntryPrice * existing.quantity) + cost + fee) /
+              newQuantity;
       existing.quantity = newQuantity;
     }
 
-    cash -= totalCost;
-
     fills.add(PaperFill(
+      id: DateTime.now().microsecondsSinceEpoch.toString(),
       symbol: symbol,
-      side: OrderSide.buy,
+      side: SignalDirection.buy,
       price: price,
       quantity: quantity,
       fee: fee,
       realizedPnl: 0,
-      time: DateTime.now().toUtc(),
+      time: DateTime.now(),
     ));
 
     return true;
@@ -439,11 +450,11 @@ class PaperPortfolio {
     required double price,
     required double quantity,
   }) {
-    if (symbol.trim().isEmpty ||
-        !price.isFinite ||
-        !quantity.isFinite ||
+    if (symbol.isEmpty ||
         price <= 0 ||
-        quantity <= 0) {
+        quantity <= 0 ||
+        !price.isFinite ||
+        !quantity.isFinite) {
       return false;
     }
 
@@ -453,16 +464,14 @@ class PaperPortfolio {
       return false;
     }
 
-    final value = price * quantity;
-    final fee = value * feeRate;
-    final proceeds = value - fee;
+    final gross = price * quantity;
+    final fee = gross * feeRate;
+    final proceeds = gross - fee;
 
-    if (!proceeds.isFinite || proceeds < 0) return false;
+    final costBasis = position.averageEntryPrice * quantity;
+    final pnl = proceeds - costBasis;
 
-    final pnl = (price - position.averageEntryPrice) * quantity - fee;
-
-    cash += proceeds;
-    realizedPnl += pnl;
+    cashUsdt += proceeds;
     position.quantity -= quantity;
 
     if (position.quantity <= 0.00000001) {
@@ -470,41 +479,36 @@ class PaperPortfolio {
     }
 
     fills.add(PaperFill(
+      id: DateTime.now().microsecondsSinceEpoch.toString(),
       symbol: symbol,
-      side: OrderSide.sell,
+      side: SignalDirection.sell,
       price: price,
       quantity: quantity,
       fee: fee,
       realizedPnl: pnl,
-      time: DateTime.now().toUtc(),
+      time: DateTime.now(),
     ));
 
     return true;
   }
+
+  void reset() {
+    cashUsdt = initialUsdt;
+    peakEquity = initialUsdt;
+    dayStartingEquity = initialUsdt;
+    _currentDay = DateTime.now();
+    positions.clear();
+    fills.clear();
+  }
 }
 
-// ======================== LIVE TRADING GATE ===================
+// -------------------- LIVE TRADING SAFETY --------------------
 
-// This interface does not send orders.
-// A separately audited broker adapter is required.
+class LiveTradingGuard {
+  LiveTradingGuard._();
 
-abstract class TradingGateway {
-  Future<bool> checkConnection();
-
-  Future<void> close();
-}
-
-class LiveTradingGate {
-  LiveTradingGate._();
-
+  // سفارش واقعی تا زمان تکمیل اتصال امن و تأیید کاربر غیرفعال است.
   static const bool enabled = false;
 
-  static String get status =>
-      'معاملات واقعی تا تکمیل اتصال امن و آزمون مستقل غیرفعال است.';
-
-  static Future<void> submitOrder() async {
-    throw StateError(
-      'ارسال سفارش واقعی هنوز فعال نشده است.',
-    );
-  }
+  static bool canSubmitRealOrder() => enabled;
 }
