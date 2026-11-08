@@ -16,10 +16,12 @@ class KrakenProvider implements MarketProvider, CandleMarketProvider {
 
   WebSocketChannel? _socket;
   StreamSubscription? _subscription;
+
   bool _closed = false;
   bool _connecting = false;
 
   final Set<String> _subscribed = {};
+  final Map<String, String> _symbolsByPair = {};
   final Map<String, MarketQuote> _quotes = {};
 
   KrakenProvider({
@@ -38,8 +40,6 @@ class KrakenProvider implements MarketProvider, CandleMarketProvider {
   MarketType get market => MarketType.crypto;
 
   String _pair(String symbol) {
-    final value = symbol.trim().toUpperCase();
-
     const pairs = {
       'BTCUSDT': 'XBT/USDT',
       'ETHUSDT': 'ETH/USDT',
@@ -50,6 +50,7 @@ class KrakenProvider implements MarketProvider, CandleMarketProvider {
       'DOGEUSDT': 'DOGE/USDT',
     };
 
+    final value = symbol.trim().toUpperCase();
     return pairs[value] ?? value;
   }
 
@@ -74,6 +75,7 @@ class KrakenProvider implements MarketProvider, CandleMarketProvider {
       if (response.statusCode != 200) return false;
 
       final data = jsonDecode(response.body);
+
       return data is Map &&
           data['error'] is List &&
           (data['error'] as List).isEmpty;
@@ -81,6 +83,8 @@ class KrakenProvider implements MarketProvider, CandleMarketProvider {
       return false;
     }
   }
+
+  // -------------------- WEBSOCKET --------------------
 
   void _connectWebSocket() {
     if (_closed || _connecting || _socket != null) return;
@@ -93,9 +97,7 @@ class KrakenProvider implements MarketProvider, CandleMarketProvider {
 
       _subscription = socket.stream.listen(
         _handleMessage,
-        onError: (_) {
-          _resetSocket();
-        },
+        onError: (_) => _resetSocket(),
         onDone: _resetSocket,
         cancelOnError: true,
       );
@@ -113,6 +115,9 @@ class KrakenProvider implements MarketProvider, CandleMarketProvider {
 
   void _subscribe(String symbol) {
     final pair = _pair(symbol);
+
+    // نگاشت نماد قبل از دریافت اولین پیام ثبت می‌شود.
+    _symbolsByPair[pair] = symbol.toUpperCase();
 
     _connectWebSocket();
 
@@ -149,20 +154,16 @@ class KrakenProvider implements MarketProvider, CandleMarketProvider {
         final pair = item['symbol']?.toString();
         if (pair == null) continue;
 
-        final entry = _quotes.entries.where(
-          (e) => _pair(e.key) == pair,
-        );
+        final appSymbol = _symbolsByPair[pair];
+        if (appSymbol == null) continue;
 
-        if (entry.isEmpty) continue;
-
-        final appSymbol = entry.first.key;
         final bid = _number(item['bid']);
         final ask = _number(item['ask']);
         final volume = _number(item['volume']);
 
         if (bid <= 0 || ask < bid) continue;
 
-        _quotes[appSymbol] = MarketQuote(
+        final quote = MarketQuote(
           providerId: id,
           symbol: appSymbol,
           market: MarketType.crypto,
@@ -171,11 +172,17 @@ class KrakenProvider implements MarketProvider, CandleMarketProvider {
           volume: volume,
           timestamp: DateTime.now(),
         );
+
+        if (quote.isValid) {
+          _quotes[appSymbol] = quote;
+        }
       }
     } catch (_) {
       // پیام نامعتبر نادیده گرفته می‌شود.
     }
   }
+
+  // -------------------- REST QUOTE --------------------
 
   Future<MarketQuote?> _fetchRestQuote(String symbol) async {
     final uri = Uri.parse('$restUrl/0/public/Ticker').replace(
@@ -189,8 +196,12 @@ class KrakenProvider implements MarketProvider, CandleMarketProvider {
     if (response.statusCode != 200) return null;
 
     final decoded = jsonDecode(response.body);
-    if (decoded is! Map || decoded['error'] is! List) return null;
-    if ((decoded['error'] as List).isNotEmpty) return null;
+
+    if (decoded is! Map ||
+        decoded['error'] is! List ||
+        (decoded['error'] as List).isNotEmpty) {
+      return null;
+    }
 
     final result = decoded['result'];
     if (result is! Map || result.isEmpty) return null;
@@ -202,13 +213,16 @@ class KrakenProvider implements MarketProvider, CandleMarketProvider {
     final bids = ticker['b'];
     final volumes = ticker['v'];
 
-    if (asks is! List || bids is! List ||
-        asks.isEmpty || bids.isEmpty) {
+    if (asks is! List ||
+        bids is! List ||
+        asks.isEmpty ||
+        bids.isEmpty) {
       return null;
     }
 
     final bid = _number(bids[0]);
     final ask = _number(asks[0]);
+
     final volume = volumes is List && volumes.length > 1
         ? _number(volumes[1])
         : 0.0;
@@ -235,14 +249,17 @@ class KrakenProvider implements MarketProvider, CandleMarketProvider {
     _subscribe(normalized);
 
     final cached = _quotes[normalized];
+
     if (cached != null &&
         cached.isFresh(maximumAge: const Duration(seconds: 5))) {
       return cached;
     }
 
-    // فرصت کوتاه برای دریافت قیمت از WebSocket
+    // انتظار برای دریافت قیمت زنده
     for (var i = 0; i < 8; i++) {
       await Future.delayed(const Duration(milliseconds: 250));
+
+      if (_closed) return null;
 
       final quote = _quotes[normalized];
 
@@ -250,21 +267,23 @@ class KrakenProvider implements MarketProvider, CandleMarketProvider {
           quote.isFresh(maximumAge: const Duration(seconds: 5))) {
         return quote;
       }
-
-      if (_closed) return null;
     }
 
-    // پشتیبان HTTP در صورت آماده نبودن WebSocket
+    // مسیر جایگزین REST
     try {
       final quote = await _fetchRestQuote(normalized);
+
       if (quote != null) {
         _quotes[normalized] = quote;
       }
+
       return quote;
     } catch (_) {
       return null;
     }
   }
+
+  // -------------------- CANDLES --------------------
 
   int _interval(String value) {
     const intervals = {
@@ -280,7 +299,7 @@ class KrakenProvider implements MarketProvider, CandleMarketProvider {
     final result = intervals[value];
 
     if (result == null) {
-      throw ArgumentError('تایم‌فریم در Kraken پشتیبانی نمی‌شود: $value');
+      throw ArgumentError('تایم‌فریم پشتیبانی نمی‌شود: $value');
     }
 
     return result;
@@ -334,14 +353,9 @@ class KrakenProvider implements MarketProvider, CandleMarketProvider {
     final candles = <Candle>[];
 
     for (final item in rows) {
-      if (item is! List || item.length < 8) continue;
+      if (item is! List || item.length < 7) continue;
 
       final timestamp = _number(item[0]);
-      final open = _number(item[1]);
-      final high = _number(item[2]);
-      final low = _number(item[3]);
-      final close = _number(item[4]);
-      final volume = _number(item[6]);
 
       if (timestamp <= 0) continue;
 
@@ -350,11 +364,11 @@ class KrakenProvider implements MarketProvider, CandleMarketProvider {
           (timestamp * 1000).round(),
           isUtc: true,
         ),
-        open: open,
-        high: high,
-        low: low,
-        close: close,
-        volume: volume,
+        open: _number(item[1]),
+        high: _number(item[2]),
+        low: _number(item[3]),
+        close: _number(item[4]),
+        volume: _number(item[6]),
       );
 
       if (candle.isValid) candles.add(candle);
@@ -371,6 +385,8 @@ class KrakenProvider implements MarketProvider, CandleMarketProvider {
     return candles;
   }
 
+  // -------------------- CLOSE --------------------
+
   @override
   Future<void> close() async {
     if (_closed) return;
@@ -384,6 +400,9 @@ class KrakenProvider implements MarketProvider, CandleMarketProvider {
     } catch (_) {}
 
     _socket = null;
+    _quotes.clear();
+    _symbolsByPair.clear();
+
     _client.close();
   }
 }
