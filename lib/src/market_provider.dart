@@ -1,9 +1,10 @@
 
 import 'exchange_router.dart';
+import 'engine.dart';
 
 // =====================================================
 // AI TRADE PRO
-// Market Provider Interface - Version 0.5.0
+// Market Provider Interface - Version 0.6.0
 // =====================================================
 
 class MarketQuote {
@@ -35,17 +36,16 @@ class MarketQuote {
     return spread / mid * 100;
   }
 
-  bool get isValid {
-    return providerId.isNotEmpty &&
-        symbol.isNotEmpty &&
-        bid > 0 &&
-        ask > 0 &&
-        ask >= bid &&
-        volume >= 0 &&
-        bid.isFinite &&
-        ask.isFinite &&
-        volume.isFinite;
-  }
+  bool get isValid =>
+      providerId.isNotEmpty &&
+      symbol.isNotEmpty &&
+      bid > 0 &&
+      ask > 0 &&
+      ask >= bid &&
+      volume >= 0 &&
+      bid.isFinite &&
+      ask.isFinite &&
+      volume.isFinite;
 
   bool isFresh({
     Duration maximumAge = const Duration(seconds: 30),
@@ -53,7 +53,6 @@ class MarketQuote {
     if (!isValid) return false;
 
     final age = DateTime.now().difference(timestamp);
-
     return !age.isNegative && age <= maximumAge;
   }
 }
@@ -72,6 +71,16 @@ abstract class MarketProvider {
   Future<MarketQuote?> fetchQuote(String symbol);
 
   Future<void> close();
+}
+
+// -------------------- CANDLE DATA INTERFACE --------------------
+
+abstract class CandleMarketProvider {
+  Future<List<Candle>> fetchCandles(
+    String symbol,
+    String interval, {
+    int limit = 200,
+  });
 }
 
 // -------------------- CONNECTION STATUS --------------------
@@ -146,7 +155,7 @@ class MarketProviderRegistry {
         try {
           await provider.close();
         } catch (_) {
-          // خطای بستن یک منبع نباید مانع بستن بقیه شود.
+          // بستن سایر منابع ادامه پیدا می‌کند.
         }
       }),
     );
@@ -161,7 +170,7 @@ class MarketConnectionChecker {
   MarketConnectionChecker(this.registry);
 
   Future<List<ProviderStatus>> checkAll() async {
-    final results = await Future.wait(
+    return Future.wait(
       registry.providers.map((provider) async {
         try {
           final connected = await provider
@@ -187,7 +196,5 @@ class MarketConnectionChecker {
         }
       }),
     );
-
-    return results;
   }
 }
