@@ -1,6 +1,6 @@
 
 import 'package:flutter/material.dart';
-
+import 'dart:math';
 import 'engine.dart';
 import 'exchange_router.dart';
 import 'market_hub.dart';
@@ -836,7 +836,7 @@ class TradingChartPainter extends CustomPainter {
     }
 
     final candleWidth = (chartWidth / visible.length * 0.65)
-        .clamp(2.0, 10.0);
+        .clamp(2.0, 10.0).toDouble();
 
     for (int i = 0; i < visible.length; i++) {
       final candle = visible[i];
