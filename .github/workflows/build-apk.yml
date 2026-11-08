@@ -19,6 +19,12 @@ jobs:
       - name: Checkout source
         uses: actions/checkout@v4
 
+      - name: Setup Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
       - name: Setup Flutter
         uses: subosito/flutter-action@v2
         with:
@@ -26,8 +32,16 @@ jobs:
           channel: stable
           cache: true
 
+      - name: Recreate Android project structure
+        run: |
+          rm -rf android
+          flutter create --platforms=android --org com.aitradepro --project-name ai_trade_pro .
+
       - name: Install dependencies
         run: flutter pub get
+
+      - name: Check Flutter project
+        run: flutter analyze
 
       - name: Build release APK
         run: flutter build apk --release
