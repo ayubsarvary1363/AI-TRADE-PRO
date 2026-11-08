@@ -1,0 +1,389 @@
+
+import 'dart:async';
+import 'dart:convert';
+
+import 'package:http/http.dart' as http;
+import 'package:web_socket_channel/web_socket_channel.dart';
+
+import 'engine.dart';
+import 'exchange_router.dart';
+import 'market_provider.dart';
+
+class KrakenProvider implements MarketProvider, CandleMarketProvider {
+  final http.Client _client;
+  final String restUrl;
+  final String wsUrl;
+
+  WebSocketChannel? _socket;
+  StreamSubscription? _subscription;
+  bool _closed = false;
+  bool _connecting = false;
+
+  final Set<String> _subscribed = {};
+  final Map<String, MarketQuote> _quotes = {};
+
+  KrakenProvider({
+    http.Client? client,
+    this.restUrl = 'https://api.kraken.com',
+    this.wsUrl = 'wss://ws.kraken.com/v2',
+  }) : _client = client ?? http.Client();
+
+  @override
+  String get id => 'kraken';
+
+  @override
+  String get name => 'Kraken';
+
+  @override
+  MarketType get market => MarketType.crypto;
+
+  String _pair(String symbol) {
+    final value = symbol.trim().toUpperCase();
+
+    const pairs = {
+      'BTCUSDT': 'XBT/USDT',
+      'ETHUSDT': 'ETH/USDT',
+      'BNBUSDT': 'BNB/USDT',
+      'SOLUSDT': 'SOL/USDT',
+      'XRPUSDT': 'XRP/USDT',
+      'ADAUSDT': 'ADA/USDT',
+      'DOGEUSDT': 'DOGE/USDT',
+    };
+
+    return pairs[value] ?? value;
+  }
+
+  String _restPair(String symbol) {
+    return _pair(symbol).replaceAll('/', '');
+  }
+
+  double _number(dynamic value) {
+    if (value is num) return value.toDouble();
+    return double.tryParse(value?.toString() ?? '') ?? 0;
+  }
+
+  @override
+  Future<bool> checkConnection() async {
+    if (_closed) return false;
+
+    try {
+      final response = await _client
+          .get(Uri.parse('$restUrl/0/public/SystemStatus'))
+          .timeout(const Duration(seconds: 8));
+
+      if (response.statusCode != 200) return false;
+
+      final data = jsonDecode(response.body);
+      return data is Map &&
+          data['error'] is List &&
+          (data['error'] as List).isEmpty;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  void _connectWebSocket() {
+    if (_closed || _connecting || _socket != null) return;
+
+    _connecting = true;
+
+    try {
+      final socket = WebSocketChannel.connect(Uri.parse(wsUrl));
+      _socket = socket;
+
+      _subscription = socket.stream.listen(
+        _handleMessage,
+        onError: (_) {
+          _resetSocket();
+        },
+        onDone: _resetSocket,
+        cancelOnError: true,
+      );
+    } catch (_) {
+      _resetSocket();
+    } finally {
+      _connecting = false;
+    }
+  }
+
+  void _resetSocket() {
+    _socket = null;
+    _subscribed.clear();
+  }
+
+  void _subscribe(String symbol) {
+    final pair = _pair(symbol);
+
+    _connectWebSocket();
+
+    if (_socket == null || _subscribed.contains(pair)) return;
+
+    try {
+      _socket!.sink.add(jsonEncode({
+        'method': 'subscribe',
+        'params': {
+          'channel': 'ticker',
+          'symbol': [pair],
+        },
+      }));
+
+      _subscribed.add(pair);
+    } catch (_) {
+      _resetSocket();
+    }
+  }
+
+  void _handleMessage(dynamic message) {
+    try {
+      final decoded = jsonDecode(message.toString());
+
+      if (decoded is! Map) return;
+      if (decoded['channel'] != 'ticker') return;
+
+      final data = decoded['data'];
+      if (data is! List) return;
+
+      for (final item in data) {
+        if (item is! Map) continue;
+
+        final pair = item['symbol']?.toString();
+        if (pair == null) continue;
+
+        final entry = _quotes.entries.where(
+          (e) => _pair(e.key) == pair,
+        );
+
+        if (entry.isEmpty) continue;
+
+        final appSymbol = entry.first.key;
+        final bid = _number(item['bid']);
+        final ask = _number(item['ask']);
+        final volume = _number(item['volume']);
+
+        if (bid <= 0 || ask < bid) continue;
+
+        _quotes[appSymbol] = MarketQuote(
+          providerId: id,
+          symbol: appSymbol,
+          market: MarketType.crypto,
+          bid: bid,
+          ask: ask,
+          volume: volume,
+          timestamp: DateTime.now(),
+        );
+      }
+    } catch (_) {
+      // پیام نامعتبر نادیده گرفته می‌شود.
+    }
+  }
+
+  Future<MarketQuote?> _fetchRestQuote(String symbol) async {
+    final uri = Uri.parse('$restUrl/0/public/Ticker').replace(
+      queryParameters: {'pair': _restPair(symbol)},
+    );
+
+    final response = await _client.get(uri).timeout(
+      const Duration(seconds: 8),
+    );
+
+    if (response.statusCode != 200) return null;
+
+    final decoded = jsonDecode(response.body);
+    if (decoded is! Map || decoded['error'] is! List) return null;
+    if ((decoded['error'] as List).isNotEmpty) return null;
+
+    final result = decoded['result'];
+    if (result is! Map || result.isEmpty) return null;
+
+    final ticker = result.values.first;
+    if (ticker is! Map) return null;
+
+    final asks = ticker['a'];
+    final bids = ticker['b'];
+    final volumes = ticker['v'];
+
+    if (asks is! List || bids is! List ||
+        asks.isEmpty || bids.isEmpty) {
+      return null;
+    }
+
+    final bid = _number(bids[0]);
+    final ask = _number(asks[0]);
+    final volume = volumes is List && volumes.length > 1
+        ? _number(volumes[1])
+        : 0.0;
+
+    final quote = MarketQuote(
+      providerId: id,
+      symbol: symbol.toUpperCase(),
+      market: MarketType.crypto,
+      bid: bid,
+      ask: ask,
+      volume: volume,
+      timestamp: DateTime.now(),
+    );
+
+    return quote.isValid ? quote : null;
+  }
+
+  @override
+  Future<MarketQuote?> fetchQuote(String symbol) async {
+    if (_closed || symbol.trim().isEmpty) return null;
+
+    final normalized = symbol.trim().toUpperCase();
+
+    _subscribe(normalized);
+
+    final cached = _quotes[normalized];
+    if (cached != null &&
+        cached.isFresh(maximumAge: const Duration(seconds: 5))) {
+      return cached;
+    }
+
+    // فرصت کوتاه برای دریافت قیمت از WebSocket
+    for (var i = 0; i < 8; i++) {
+      await Future.delayed(const Duration(milliseconds: 250));
+
+      final quote = _quotes[normalized];
+
+      if (quote != null &&
+          quote.isFresh(maximumAge: const Duration(seconds: 5))) {
+        return quote;
+      }
+
+      if (_closed) return null;
+    }
+
+    // پشتیبان HTTP در صورت آماده نبودن WebSocket
+    try {
+      final quote = await _fetchRestQuote(normalized);
+      if (quote != null) {
+        _quotes[normalized] = quote;
+      }
+      return quote;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  int _interval(String value) {
+    const intervals = {
+      '1m': 1,
+      '5m': 5,
+      '15m': 15,
+      '30m': 30,
+      '1h': 60,
+      '4h': 240,
+      '1d': 1440,
+    };
+
+    final result = intervals[value];
+
+    if (result == null) {
+      throw ArgumentError('تایم‌فریم در Kraken پشتیبانی نمی‌شود: $value');
+    }
+
+    return result;
+  }
+
+  @override
+  Future<List<Candle>> fetchCandles(
+    String symbol,
+    String interval, {
+    int limit = 200,
+  }) async {
+    if (_closed || symbol.trim().isEmpty) return const [];
+
+    final uri = Uri.parse('$restUrl/0/public/OHLC').replace(
+      queryParameters: {
+        'pair': _restPair(symbol),
+        'interval': _interval(interval).toString(),
+      },
+    );
+
+    final response = await _client.get(uri).timeout(
+      const Duration(seconds: 12),
+    );
+
+    if (response.statusCode != 200) {
+      throw StateError('خطای دریافت کندل Kraken: ${response.statusCode}');
+    }
+
+    final decoded = jsonDecode(response.body);
+
+    if (decoded is! Map ||
+        decoded['error'] is! List ||
+        (decoded['error'] as List).isNotEmpty) {
+      throw StateError('پاسخ کندل Kraken معتبر نیست');
+    }
+
+    final result = decoded['result'];
+    if (result is! Map) return const [];
+
+    dynamic rows;
+
+    for (final entry in result.entries) {
+      if (entry.key.toString() != 'last') {
+        rows = entry.value;
+        break;
+      }
+    }
+
+    if (rows is! List) return const [];
+
+    final candles = <Candle>[];
+
+    for (final item in rows) {
+      if (item is! List || item.length < 8) continue;
+
+      final timestamp = _number(item[0]);
+      final open = _number(item[1]);
+      final high = _number(item[2]);
+      final low = _number(item[3]);
+      final close = _number(item[4]);
+      final volume = _number(item[6]);
+
+      if (timestamp <= 0) continue;
+
+      final candle = Candle(
+        time: DateTime.fromMillisecondsSinceEpoch(
+          (timestamp * 1000).round(),
+          isUtc: true,
+        ),
+        open: open,
+        high: high,
+        low: low,
+        close: close,
+        volume: volume,
+      );
+
+      if (candle.isValid) candles.add(candle);
+    }
+
+    candles.sort((a, b) => a.time.compareTo(b.time));
+
+    final safeLimit = limit.clamp(30, 720);
+
+    if (candles.length > safeLimit) {
+      return candles.sublist(candles.length - safeLimit);
+    }
+
+    return candles;
+  }
+
+  @override
+  Future<void> close() async {
+    if (_closed) return;
+
+    _closed = true;
+
+    await _subscription?.cancel();
+
+    try {
+      await _socket?.sink.close();
+    } catch (_) {}
+
+    _socket = null;
+    _client.close();
+  }
+}
