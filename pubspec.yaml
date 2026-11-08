@@ -1,8 +1,7 @@
-
 name: ai_trade_pro
-description: AI Trade Pro - Automated Paper Trading
+description: AI Trade Pro - Secure Automated Trading Platform
 publish_to: 'none'
-version: 0.2.0+2
+version: 0.5.0+5
 
 environment:
   sdk: '>=3.3.0 <4.0.0'
@@ -10,8 +9,21 @@ environment:
 dependencies:
   flutter:
     sdk: flutter
+
+  # ارتباط امن با سرویس‌ها و APIها
   http: ^1.2.2
+  web_socket_channel: ^3.0.1
+
+  # نگهداری امن اطلاعات حساس و تنظیمات
+  flutter_secure_storage: ^9.2.2
   shared_preferences: ^2.3.2
+
+  # ذخیره دائمی معاملات و تاریخچه
+  sqflite: ^2.3.3+1
+  path: ^1.9.0
+
+  # نمودار قیمت و معاملات
+  fl_chart: ^0.69.0
 
 dev_dependencies:
   flutter_test:
