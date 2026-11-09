@@ -38,6 +38,31 @@ jobs:
           rm -rf android
           flutter create --platforms=android --org com.aitradepro --project-name ai_trade_pro .
 
+      - name: Ensure Android release network permissions
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          import xml.etree.ElementTree as ET
+          p = Path("android/app/src/main/AndroidManifest.xml")
+          ET.register_namespace("android", "http://schemas.android.com/apk/res/android")
+          tree = ET.parse(p)
+          root = tree.getroot()
+          ns = "{http://schemas.android.com/apk/res/android}"
+          required = [
+              "android.permission.INTERNET",
+              "android.permission.ACCESS_NETWORK_STATE",
+          ]
+          existing = {node.get(ns + "name") for node in root.findall("uses-permission")}
+          for permission in required:
+              if permission not in existing:
+                  node = ET.Element("uses-permission")
+                  node.set(ns + "name", permission)
+                  root.insert(0, node)
+          tree.write(p, encoding="utf-8", xml_declaration=True)
+          print(p.read_text())
+          PY
+          grep -q 'android.permission.INTERNET' android/app/src/main/AndroidManifest.xml
+
       - name: Select reachable Gradle distribution mirror
         run: |
           set -e
