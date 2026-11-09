@@ -239,8 +239,7 @@ class MarketHub {
     if (_disposed || symbol.trim().isEmpty) return const [];
 
     final providers = registry.providersFor(market)
-        .where((provider) => provider is CandleMarketProvider)
-        .cast<CandleMarketProvider>()
+        .whereType<CandleMarketProvider>()
         .toList();
 
     if (providers.isEmpty) {
