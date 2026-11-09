@@ -71,7 +71,11 @@ class MarketHub {
         if (_disposed) return;
 
         if (quote == null) {
-          providerErrors[provider.id] = 'قیمت دریافت نشد';
+          final diagnostic = provider is MarketProviderDiagnostics
+              ? provider.lastError
+              : null;
+          providerErrors[provider.id] =
+              diagnostic ?? 'قیمت دریافت نشد یا پاسخ خالی بود';
           return;
         }
 
@@ -123,7 +127,9 @@ class MarketHub {
     if (_disposed) return null;
 
     if (candidates.isEmpty) {
-      lastQuoteStatus = 'دریافت قیمت از تمام منابع ناموفق بود';
+      lastQuoteStatus = _withProviderDiagnostics(
+        'دریافت قیمت از تمام منابع ناموفق بود',
+      );
       return null;
     }
 
@@ -176,7 +182,15 @@ class MarketHub {
             .fetchQuote(symbol)
             .timeout(quoteTimeout);
 
-        if (_disposed || quote == null) return null;
+        if (_disposed) return null;
+        if (quote == null) {
+          final diagnostic = provider is MarketProviderDiagnostics
+              ? provider.lastError
+              : null;
+          providerErrors[provider.id] =
+              diagnostic ?? 'قیمت دریافت نشد یا پاسخ خالی بود';
+          return null;
+        }
 
         if (quote.providerId != provider.id ||
             quote.symbol.toUpperCase() != symbol.toUpperCase() ||
@@ -206,7 +220,9 @@ class MarketHub {
       ..sort((a, b) => a.spreadPercent.compareTo(b.spreadPercent));
 
     if (quotes.isEmpty) {
-      lastQuoteStatus = 'دریافت قیمت از تمام منابع ناموفق بود';
+      lastQuoteStatus = _withProviderDiagnostics(
+        'دریافت قیمت از تمام منابع ناموفق بود',
+      );
       return const [];
     }
 
@@ -257,8 +273,11 @@ class MarketHub {
           ..sort((a, b) => a.time.compareTo(b.time));
 
         if (valid.length < 30) {
+          final diagnostic = marketProvider is MarketProviderDiagnostics
+              ? marketProvider.lastError
+              : null;
           providerErrors[marketProvider.id] =
-              'تعداد کندل معتبر کمتر از ۳۰ است';
+              diagnostic ?? 'تعداد کندل معتبر کمتر از ۳۰ است (${valid.length})';
           return <Candle>[];
         }
 
@@ -268,7 +287,10 @@ class MarketHub {
         providerErrors[marketProvider.id] = 'مهلت دریافت کندل تمام شد';
         return <Candle>[];
       } catch (error) {
-        providerErrors[marketProvider.id] = error.toString();
+        final diagnostic = marketProvider is MarketProviderDiagnostics
+            ? marketProvider.lastError
+            : null;
+        providerErrors[marketProvider.id] = diagnostic ?? error.toString();
         return <Candle>[];
       }
     });
@@ -280,7 +302,9 @@ class MarketHub {
     results.sort((a, b) => b.length.compareTo(a.length));
 
     if (results.isEmpty || results.first.isEmpty) {
-      lastCandleStatus = 'دریافت کندل از تمام منابع ناموفق بود';
+      lastCandleStatus = _withProviderDiagnostics(
+        'دریافت کندل از تمام منابع ناموفق بود',
+      );
       return const [];
     }
 
@@ -290,6 +314,13 @@ class MarketHub {
         '${results.first.length} کندل معتبر دریافت شد';
 
     return results.first;
+  }
+
+  String _withProviderDiagnostics(String message) {
+    final details = providerErrors.entries
+        .map((entry) => '${entry.key}: ${entry.value}')
+        .join(' | ');
+    return details.isEmpty ? message : '$message | $details';
   }
 
   // -------------------- CONNECTIONS --------------------
