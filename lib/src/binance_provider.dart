@@ -15,12 +15,15 @@ import 'engine.dart';
 // No API key | No real orders
 // =====================================================
 
-class BinanceProvider implements MarketProvider, CandleMarketProvider {
+class BinanceProvider implements MarketProvider, CandleMarketProvider, MarketProviderDiagnostics {
   final http.Client _client;
   final String baseUrl;
   final Duration timeout;
 
   bool _closed = false;
+
+  @override
+  String? lastError;
   DateTime? _lastRequestTime;
   DateTime? _blockedUntil;
 
@@ -91,8 +94,11 @@ class BinanceProvider implements MarketProvider, CandleMarketProvider {
         Uri.parse('$baseUrl/api/v3/ping'),
       );
 
-      return response.statusCode == 200;
-    } catch (_) {
+      final ok = response.statusCode == 200;
+      lastError = ok ? null : 'HTTP ${response.statusCode}';
+      return ok;
+    } catch (error) {
+      lastError = error.toString();
       return false;
     }
   }
@@ -130,8 +136,14 @@ class BinanceProvider implements MarketProvider, CandleMarketProvider {
         timestamp: DateTime.now(),
       );
 
-      return quote.isValid ? quote : null;
-    } catch (_) {
+      if (!quote.isValid) {
+        lastError = 'Binance quote invalid';
+        return null;
+      }
+      lastError = null;
+      return quote;
+    } catch (error) {
+      lastError = error.toString();
       return null;
     }
   }
