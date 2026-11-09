@@ -355,7 +355,9 @@ class _HomeScreenState extends State<HomeScreen> {
                   : CustomPaint(
                       painter: TradingChartPainter(
                         candles: candles,
-                        fills: _controller.portfolio.fills,
+                        fills: _controller.portfolio.fills
+                            .where((fill) => fill.symbol == _controller.symbol)
+                            .toList(),
                       ),
                       child: const SizedBox.expand(),
                     ),
@@ -446,6 +448,7 @@ class _HomeScreenState extends State<HomeScreen> {
 
   Widget _markets() {
     const symbols = TradingController.supportedSymbols;
+    const forexSymbols = TradingController.supportedForexSymbols;
 
     return ListView(
       padding: const EdgeInsets.all(16),
@@ -455,7 +458,7 @@ class _HomeScreenState extends State<HomeScreen> {
           child: Padding(
             padding: EdgeInsets.all(14),
             child: Text(
-              'ربات در حالت آزمایشی همه ۷ ارز زیر را به‌صورت خودکار و مستقل بررسی می‌کند. انتخاب هر ارز فقط نمودار و جزئیات همان ارز را نمایش می‌دهد و دامنه معاملات خودکار را محدود نمی‌کند.',
+              'ربات در حالت آزمایشی ۷ رمزارز و ۴ جفت‌ارز فارکس را به‌صورت خودکار بررسی می‌کند. داده‌های فارکس از منبع عمومی و با اسپرد تخمینی هستند؛ این نسخه به کارگزار متصل نیست و سفارش واقعی نمی‌فرستد.',
             ),
           ),
         ),
@@ -465,7 +468,26 @@ class _HomeScreenState extends State<HomeScreen> {
             children: symbols.map((symbol) {
               return ListTile(
                 title: Text(symbol),
-                subtitle: const Text('در فهرست پایش خودکار'),
+                subtitle: const Text('رمزارز • پایش خودکار'),
+                trailing: _controller.symbol == symbol
+                    ? const Icon(
+                        Icons.check_circle,
+                        color: Colors.greenAccent,
+                      )
+                    : null,
+                onTap: () => _controller.changeSymbol(symbol),
+              );
+            }).toList(),
+          ),
+        ),
+        const SizedBox(height: 16),
+        _sectionTitle('جفت‌ارزهای فارکس'),
+        Card(
+          child: Column(
+            children: forexSymbols.map((symbol) {
+              return ListTile(
+                title: Text(symbol.replaceAll('=X', '')),
+                subtitle: const Text('فارکس • داده عمومی و آزمایشی'),
                 trailing: _controller.symbol == symbol
                     ? const Icon(
                         Icons.check_circle,
