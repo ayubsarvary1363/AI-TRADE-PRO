@@ -423,9 +423,7 @@ class TradingController extends ChangeNotifier {
         return 'HOLD';
       }
 
-      // One actionable decision per symbol per candle.
-      _lastProcessedCandles[item] = candleTime;
-
+      // One executable decision per symbol per candle.
       final currentEquity = portfolio.updateEquity(_currentPrices);
       final canTrade = riskManager.canTrade(
         currentEquity: currentEquity,
@@ -451,6 +449,7 @@ class TradingController extends ChangeNotifier {
         );
         if (quantity <= 0) return '$item: حجم خرید صفر است';
 
+        _lastProcessedCandles[item] = candleTime;
         return portfolio.buy(
           symbol: item,
           price: entry,
@@ -462,6 +461,7 @@ class TradingController extends ChangeNotifier {
         final position = portfolio.positions[item];
         if (position == null) return 'HOLD';
 
+        _lastProcessedCandles[item] = candleTime;
         return portfolio.sell(
           symbol: item,
           price: quote.bid,
