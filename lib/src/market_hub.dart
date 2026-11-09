@@ -71,9 +71,7 @@ class MarketHub {
         if (_disposed) return;
 
         if (quote == null) {
-          final diagnostic = provider is MarketProviderDiagnostics
-              ? provider.lastError
-              : null;
+          final diagnostic = _providerError(provider);
           providerErrors[provider.id] =
               diagnostic ?? 'قیمت دریافت نشد یا پاسخ خالی بود';
           return;
@@ -184,9 +182,7 @@ class MarketHub {
 
         if (_disposed) return null;
         if (quote == null) {
-          final diagnostic = provider is MarketProviderDiagnostics
-              ? provider.lastError
-              : null;
+          final diagnostic = _providerError(provider);
           providerErrors[provider.id] =
               diagnostic ?? 'قیمت دریافت نشد یا پاسخ خالی بود';
           return null;
@@ -273,9 +269,7 @@ class MarketHub {
           ..sort((a, b) => a.time.compareTo(b.time));
 
         if (valid.length < 30) {
-          final diagnostic = marketProvider is MarketProviderDiagnostics
-              ? marketProvider.lastError
-              : null;
+          final diagnostic = _providerError(marketProvider);
           providerErrors[marketProvider.id] =
               diagnostic ?? 'تعداد کندل معتبر کمتر از ۳۰ است (${valid.length})';
           return <Candle>[];
@@ -287,9 +281,7 @@ class MarketHub {
         providerErrors[marketProvider.id] = 'مهلت دریافت کندل تمام شد';
         return <Candle>[];
       } catch (error) {
-        final diagnostic = marketProvider is MarketProviderDiagnostics
-            ? marketProvider.lastError
-            : null;
+        final diagnostic = _providerError(marketProvider);
         providerErrors[marketProvider.id] = diagnostic ?? error.toString();
         return <Candle>[];
       }
@@ -314,6 +306,13 @@ class MarketHub {
         '${results.first.length} کندل معتبر دریافت شد';
 
     return results.first;
+  }
+
+  String? _providerError(MarketProvider provider) {
+    if (provider is MarketProviderDiagnostics) {
+      return (provider as MarketProviderDiagnostics).lastError;
+    }
+    return null;
   }
 
   String _withProviderDiagnostics(String message) {
