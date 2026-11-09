@@ -514,8 +514,7 @@ class TradingController extends ChangeNotifier {
     candles = [];
 
     _candlesHealthy = false;
-    _lastProcessedCandle = null;
-    _lastProcessedCandles.clear();
+        _lastProcessedCandles.clear();
 
     status = 'در حال دریافت کندل‌های $interval';
 
@@ -559,8 +558,7 @@ class TradingController extends ChangeNotifier {
     _quoteHealthy = false;
     _candlesHealthy = false;
 
-    _lastProcessedCandle = null;
-    _lastProcessedCandles.clear();
+        _lastProcessedCandles.clear();
 
     lastError = null;
     status = 'حساب آزمایشی بازنشانی شد';
