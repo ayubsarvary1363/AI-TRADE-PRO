@@ -38,6 +38,11 @@ jobs:
           rm -rf android
           flutter create --platforms=android --org com.aitradepro --project-name ai_trade_pro .
 
+      - name: Use smaller Gradle distribution from direct download host
+        run: |
+          sed -i 's#https\\://services.gradle.org/distributions/gradle-8.3-all.zip#https\\://downloads.gradle.org/distributions/gradle-8.3-bin.zip#' android/gradle/wrapper/gradle-wrapper.properties
+          cat android/gradle/wrapper/gradle-wrapper.properties
+
       - name: Install dependencies
         run: flutter pub get
 
