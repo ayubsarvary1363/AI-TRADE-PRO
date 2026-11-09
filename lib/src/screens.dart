@@ -52,13 +52,13 @@ class _HomeScreenState extends State<HomeScreen> {
               'AI Trade Pro',
               style: TextStyle(fontWeight: FontWeight.bold),
             ),
-            actions: [
+            actions: const [
               Padding(
-                padding: const EdgeInsets.only(right: 16),
+                padding: EdgeInsets.only(right: 16),
                 child: Center(
                   child: Chip(
-                    avatar: const Icon(Icons.science, size: 17),
-                    label: const Text('DEMO'),
+                    avatar: Icon(Icons.science, size: 17),
+                    label: Text('DEMO'),
                   ),
                 ),
               ),
@@ -592,7 +592,7 @@ class _HomeScreenState extends State<HomeScreen> {
               '${fill.time.toLocal()}',
             ),
             trailing: Text(
-              '${fill.price.toStringAsFixed(4)}',
+              fill.price.toStringAsFixed(4),
               style: const TextStyle(fontWeight: FontWeight.bold),
             ),
           );
@@ -692,9 +692,9 @@ class _HomeScreenState extends State<HomeScreen> {
         ),
         const SizedBox(height: 16),
         _sectionTitle('مدیریت ریسک'),
-        Card(
+        const Card(
           child: Column(
-            children: const [
+            children: [
               ListTile(
                 title: Text('ریسک پایه هر معامله'),
                 trailing: Text('۰٫۵٪'),
