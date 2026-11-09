@@ -54,7 +54,6 @@ class TradingController extends ChangeNotifier {
 
   List<Candle> candles = [];
 
-  DateTime? _lastProcessedCandle;
 
   final Map<String, double> _lastPrices = {};
 
@@ -493,7 +492,6 @@ class TradingController extends ChangeNotifier {
     _quoteHealthy = false;
     _candlesHealthy = false;
 
-    _lastProcessedCandle = null;
     _lastProcessedCandles.remove(nextSymbol);
 
     status = 'در حال دریافت اطلاعات $symbol';
