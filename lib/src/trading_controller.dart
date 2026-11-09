@@ -321,7 +321,7 @@ class TradingController extends ChangeNotifier {
       if (!_disposed && _running) {
         status = traded > 0
             ? '$traded معامله آزمایشی جدید در بررسی چندارزی ثبت شد'
-            : 'بررسی چندارزی انجام شد؛ $checked از \${supportedSymbols.length} ارز بررسی شدند، فعلاً سیگنال قابل اجرا وجود ندارد';
+            : 'بررسی چندارزی انجام شد؛ $checked از ' + supportedSymbols.length.toString() + ' ارز بررسی شدند، فعلاً سیگنال قابل اجرا وجود ندارد';
         if (errors.isNotEmpty && checked == 0) {
           status = 'دریافت اطلاعات چندارزی ناموفق بود';
           lastError = errors.take(3).join(' | ');
