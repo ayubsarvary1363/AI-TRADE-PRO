@@ -445,25 +445,27 @@ class _HomeScreenState extends State<HomeScreen> {
   // -------------------- MARKETS --------------------
 
   Widget _markets() {
-    final symbols = [
-      'BTCUSDT',
-      'ETHUSDT',
-      'BNBUSDT',
-      'SOLUSDT',
-      'XRPUSDT',
-      'ADAUSDT',
-      'DOGEUSDT',
-    ];
+    final symbols = TradingController.supportedSymbols;
 
     return ListView(
       padding: const EdgeInsets.all(16),
       children: [
-        _sectionTitle('انتخاب نماد رمزارز'),
+        _sectionTitle('پایش خودکار چندارزی'),
+        const Card(
+          child: Padding(
+            padding: EdgeInsets.all(14),
+            child: Text(
+              'ربات در حالت آزمایشی همه ۷ ارز زیر را به‌صورت خودکار و مستقل بررسی می‌کند. انتخاب هر ارز فقط نمودار و جزئیات همان ارز را نمایش می‌دهد و دامنه معاملات خودکار را محدود نمی‌کند.',
+            ),
+          ),
+        ),
+        _sectionTitle('انتخاب ارز برای نمایش نمودار'),
         Card(
           child: Column(
             children: symbols.map((symbol) {
               return ListTile(
                 title: Text(symbol),
+                subtitle: const Text('در فهرست پایش خودکار'),
                 trailing: _controller.symbol == symbol
                     ? const Icon(
                         Icons.check_circle,
