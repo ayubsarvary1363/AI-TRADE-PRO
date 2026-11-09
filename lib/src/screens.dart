@@ -445,7 +445,7 @@ class _HomeScreenState extends State<HomeScreen> {
   // -------------------- MARKETS --------------------
 
   Widget _markets() {
-    final symbols = TradingController.supportedSymbols;
+    const symbols = TradingController.supportedSymbols;
 
     return ListView(
       padding: const EdgeInsets.all(16),
