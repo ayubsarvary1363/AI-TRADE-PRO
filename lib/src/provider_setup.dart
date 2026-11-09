@@ -3,6 +3,7 @@ import 'exchange_router.dart';
 import 'market_provider.dart';
 import 'kraken_provider.dart';
 import 'coinbase_provider.dart';
+import 'binance_provider.dart';
 
 class ProviderSetup {
   ProviderSetup._();
@@ -13,6 +14,7 @@ class ProviderSetup {
     // تأمین‌کنندگان عمومی داده بازار رمزارز
     registry.register(KrakenProvider());
     registry.register(CoinbaseProvider());
+    registry.register(BinanceProvider());
 
     return registry;
   }
@@ -43,5 +45,6 @@ class ProviderSetup {
   static List<String> get activeProviderNames => [
         'Kraken',
         'Coinbase',
+        'Binance',
       ];
 }
