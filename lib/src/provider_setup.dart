@@ -4,6 +4,7 @@ import 'market_provider.dart';
 import 'kraken_provider.dart';
 import 'coinbase_provider.dart';
 import 'binance_provider.dart';
+import 'yahoo_forex_provider.dart';
 
 class ProviderSetup {
   ProviderSetup._();
@@ -16,15 +17,18 @@ class ProviderSetup {
     registry.register(CoinbaseProvider());
     registry.register(BinanceProvider());
 
+    // داده‌های عمومی فارکس برای معاملات آزمایشی؛ بدون اتصال کارگزاری.
+    registry.register(YahooForexProvider());
+
     return registry;
   }
 
   static List<MarketType> get supportedMarkets => [
         MarketType.crypto,
+        MarketType.forex,
       ];
 
   static List<MarketType> get plannedMarkets => [
-        MarketType.forex,
         MarketType.stocks,
         MarketType.commodities,
         MarketType.indices,
@@ -46,5 +50,6 @@ class ProviderSetup {
         'Kraken',
         'Coinbase',
         'Binance',
+        'Yahoo Finance FX (indicative)',
       ];
 }
