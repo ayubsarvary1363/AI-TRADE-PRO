@@ -45,7 +45,7 @@ jobs:
           p = Path("android/gradle/wrapper/gradle-wrapper.properties")
           lines = p.read_text().splitlines()
           lines = [("distributionUrl=https\\://downloads.gradle.org/distributions/gradle-8.3-bin.zip" if line.startswith("distributionUrl=") else line) for line in lines]
-          p.write_text("\\n".join(lines) + "\\n")
+          p.write_text("\n".join(lines) + "\n")
           print(p.read_text())
           PY
 
@@ -56,7 +56,7 @@ jobs:
           p = Path("android/settings.gradle")
           s = p.read_text()
           mirror = "        maven { url 'https://maven.aliyun.com/repository/central' }\n        maven { url 'https://repo.huaweicloud.com/repository/maven/' }"
-           s = s.replace("mavenCentral()", "mavenCentral()\n" + mirror)
+          s = s.replace("mavenCentral()", "mavenCentral()\n" + mirror)
           p.write_text(s)
           print(p.read_text())
           PY
