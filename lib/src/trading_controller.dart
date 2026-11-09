@@ -39,6 +39,19 @@ class TradingController extends ChangeNotifier {
     'BTCUSDT', 'ETHUSDT', 'BNBUSDT', 'SOLUSDT',
     'XRPUSDT', 'ADAUSDT', 'DOGEUSDT',
   ];
+  static const List<String> supportedForexSymbols = [
+    'EURUSD=X', 'GBPUSD=X', 'AUDUSD=X', 'NZDUSD=X',
+  ];
+  static List<String> get allSupportedSymbols => [
+        ...supportedSymbols,
+        ...supportedForexSymbols,
+      ];
+
+  static MarketType marketForSymbol(String value) =>
+      value.toUpperCase().endsWith('=X')
+          ? MarketType.forex
+          : MarketType.crypto;
+
   final Map<String, DateTime> _lastProcessedCandles = {};
 
   bool _running = false;
@@ -195,7 +208,7 @@ class TradingController extends ChangeNotifier {
     try {
       final quote = await marketHub.getBestQuote(
         symbol,
-        market: MarketType.crypto,
+        market: marketForSymbol(symbol),
       );
 
       if (_disposed) return;
@@ -248,11 +261,11 @@ class TradingController extends ChangeNotifier {
 
     try {
       final quotes = await Future.wait(
-        supportedSymbols.map((item) async {
+        allSupportedSymbols.map((item) async {
           try {
             return await marketHub.getBestQuote(
               item,
-              market: MarketType.crypto,
+              market: marketForSymbol(item),
             );
           } catch (_) {
             return null;
@@ -262,8 +275,8 @@ class TradingController extends ChangeNotifier {
 
       if (_disposed) return;
 
-      for (int i = 0; i < supportedSymbols.length; i++) {
-        final item = supportedSymbols[i];
+      for (int i = 0; i < allSupportedSymbols.length; i++) {
+        final item = allSupportedSymbols[i];
         final quote = quotes[i];
         if (quote == null ||
             !quote.isValid ||
@@ -300,7 +313,7 @@ class TradingController extends ChangeNotifier {
       final result = await marketHub.fetchCandles(
         symbol,
         interval,
-        market: MarketType.crypto,
+        market: marketForSymbol(symbol),
         limit: 200,
       );
 
@@ -351,7 +364,8 @@ class TradingController extends ChangeNotifier {
 
     try {
       final results = await Future.wait(
-        supportedSymbols.map((item) => _scanSymbol(item)),
+        allSupportedSymbols.map((item) =>
+            _scanSymbol(item, market: marketForSymbol(item))),
       );
 
       for (final result in results) {
@@ -368,7 +382,7 @@ class TradingController extends ChangeNotifier {
       if (!_disposed && _running) {
         status = traded > 0
             ? '$traded معامله آزمایشی جدید در بررسی چندارزی ثبت شد'
-            : 'بررسی چندارزی انجام شد؛ $checked از ${supportedSymbols.length} ارز بررسی شدند، فعلاً سیگنال قابل اجرا وجود ندارد';
+            : 'بررسی چندارزی انجام شد؛ $checked از ${allSupportedSymbols.length} نماد بررسی شدند، فعلاً سیگنال قابل اجرا وجود ندارد';
         if (errors.isNotEmpty && checked == 0) {
           status = 'دریافت اطلاعات چندارزی ناموفق بود';
           lastError = errors.take(3).join(' | ');
@@ -386,11 +400,14 @@ class TradingController extends ChangeNotifier {
     }
   }
 
-  Future<String?> _scanSymbol(String item) async {
+  Future<String?> _scanSymbol(
+    String item, {
+    required MarketType market,
+  }) async {
     try {
       final quote = await marketHub.getBestQuote(
         item,
-        market: MarketType.crypto,
+        market: market,
       );
       if (_disposed || !_running) return null;
 
@@ -407,7 +424,7 @@ class TradingController extends ChangeNotifier {
       final data = await marketHub.fetchCandles(
         item,
         interval,
-        market: MarketType.crypto,
+        market: market,
         limit: 200,
       );
       if (_disposed || !_running) return null;
