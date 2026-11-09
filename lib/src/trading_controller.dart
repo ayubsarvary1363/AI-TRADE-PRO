@@ -33,6 +33,7 @@ class TradingController extends ChangeNotifier {
   Timer? _candleTimer;
   Timer? _scannerTimer;
   bool _scanningMarkets = false;
+  bool _refreshingAllQuotes = false;
 
   static const List<String> supportedSymbols = [
     'BTCUSDT', 'ETHUSDT', 'BNBUSDT', 'SOLUSDT',
@@ -142,7 +143,7 @@ class TradingController extends ChangeNotifier {
 
     _quoteTimer = Timer.periodic(
       const Duration(seconds: 2),
-      (_) => refreshQuote(),
+      (_) => refreshAllQuotes(),
     );
 
     _candleTimer = Timer.periodic(
@@ -238,6 +239,53 @@ class TradingController extends ChangeNotifier {
     } finally {
       _refreshingQuote = false;
 
+      if (!_disposed) notifyListeners();
+    }
+  }
+
+  Future<void> refreshAllQuotes() async {
+    if (_disposed || !_running || _refreshingAllQuotes) return;
+    _refreshingAllQuotes = true;
+
+    try {
+      final quotes = await Future.wait(
+        supportedSymbols.map((item) async {
+          try {
+            return await marketHub.getBestQuote(
+              item,
+              market: MarketType.crypto,
+            );
+          } catch (_) {
+            return null;
+          }
+        }),
+      );
+
+      if (_disposed) return;
+
+      for (int i = 0; i < supportedSymbols.length; i++) {
+        final item = supportedSymbols[i];
+        final quote = quotes[i];
+        if (quote == null ||
+            !quote.isValid ||
+            quote.symbol.toUpperCase() != item ||
+            !quote.isFresh(maximumAge: const Duration(seconds: 15))) {
+          continue;
+        }
+
+        _lastPrices[item] = quote.midPrice;
+        if (item == symbol) {
+          latestQuote = quote;
+          _quoteHealthy = true;
+        }
+      }
+
+      portfolio.updateEquity(_currentPrices);
+      if (symbol == 'BTCUSDT' && latestQuote == null) {
+        _quoteHealthy = false;
+      }
+    } finally {
+      _refreshingAllQuotes = false;
       if (!_disposed) notifyListeners();
     }
   }
