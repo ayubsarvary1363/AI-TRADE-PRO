@@ -198,3 +198,9 @@ class MarketConnectionChecker {
     );
   }
 }
+
+
+// Optional diagnostics exposed by network-backed market providers.
+abstract class MarketProviderDiagnostics {
+  String? get lastError;
+}
