@@ -212,9 +212,8 @@ class TradingController extends ChangeNotifier {
 
       _updateErrorStatus();
 
-      if (lastError == null && _running) {
-        status = 'قیمت بازار به‌روزرسانی شد';
-      }
+      // Keep the trading decision/status visible; quote refreshes must not
+      // overwrite it every two seconds.
     } catch (error) {
       if (!_disposed) {
         _quoteHealthy = false;
@@ -298,14 +297,19 @@ class TradingController extends ChangeNotifier {
 
     if (_lastProcessedCandle == candleTime) return;
 
-    _lastProcessedCandle = candleTime;
-
+    // A HOLD or low-confidence signal is not consumed. If it becomes
+    // actionable while this candle is still current, it can be evaluated.
     if (signal.direction == SignalDirection.hold ||
         signal.confidence < 0.60 ||
         currentPrice <= 0) {
-      status = 'سیگنال معتبر برای معامله وجود ندارد';
+      status = signal.direction == SignalDirection.hold
+          ? 'سیگنال فعلی انتظار است؛ ربات منتظر فرصت خرید یا فروش می‌ماند'
+          : 'اطمینان سیگنال برای معامله کافی نیست';
       return;
     }
+
+    // Process at most one actionable signal per candle.
+    _lastProcessedCandle = candleTime;
 
     final currentEquity = portfolio.updateEquity(
       _currentPrices,
@@ -382,7 +386,7 @@ class TradingController extends ChangeNotifier {
     final position = portfolio.positions[symbol];
 
     if (position == null) {
-      status = 'موقعیت بازی برای فروش وجود ندارد';
+      status = 'سیگنال فروش معتبر است، اما دارایی بازی نداریم؛ منتظر سیگنال خرید می‌مانیم';
       return;
     }
 
