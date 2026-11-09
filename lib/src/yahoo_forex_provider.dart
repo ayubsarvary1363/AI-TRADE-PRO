@@ -75,7 +75,7 @@ class YahooForexProvider
 
     final results = chart['result'];
     if (results is! List || results.isEmpty || results.first is! Map) {
-      throw StateError('داده‌ای برای نماد فارکس ${symbol} پیدا نشد');
+      throw StateError('داده‌ای برای نماد فارکس $symbol پیدا نشد');
     }
 
     return Map<String, dynamic>.from(results.first as Map);
