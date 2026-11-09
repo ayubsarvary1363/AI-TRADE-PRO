@@ -38,10 +38,16 @@ jobs:
           rm -rf android
           flutter create --platforms=android --org com.aitradepro --project-name ai_trade_pro .
 
-      - name: Use smaller Gradle distribution from direct download host
+      - name: Set reliable Gradle distribution URL
         run: |
-          sed -i 's#https\\://services.gradle.org/distributions/gradle-8.3-all.zip#https\\://downloads.gradle.org/distributions/gradle-8.3-bin.zip#' android/gradle/wrapper/gradle-wrapper.properties
-          cat android/gradle/wrapper/gradle-wrapper.properties
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path("android/gradle/wrapper/gradle-wrapper.properties")
+          lines = p.read_text().splitlines()
+          lines = [("distributionUrl=https\\://downloads.gradle.org/distributions/gradle-8.3-bin.zip" if line.startswith("distributionUrl=") else line) for line in lines]
+          p.write_text("\\n".join(lines) + "\\n")
+          print(p.read_text())
+          PY
 
       - name: Add Maven mirror fallback for Android dependencies
         run: |
@@ -49,8 +55,8 @@ jobs:
           from pathlib import Path
           p = Path("android/settings.gradle")
           s = p.read_text()
-          mirror = "        maven { url 'https://maven.aliyun.com/repository/central' }\\n        maven { url 'https://repo.huaweicloud.com/repository/maven/' }"
-          s = s.replace("mavenCentral()", "mavenCentral()\\n" + mirror)
+          mirror = "        maven { url 'https://maven.aliyun.com/repository/central' }\n        maven { url 'https://repo.huaweicloud.com/repository/maven/' }"
+           s = s.replace("mavenCentral()", "mavenCentral()\n" + mirror)
           p.write_text(s)
           print(p.read_text())
           PY
