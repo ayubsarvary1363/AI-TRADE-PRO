@@ -6,6 +6,7 @@ on:
   push:
     branches:
       - main
+      - 'fix/**'
 
 permissions:
   contents: read
@@ -39,6 +40,9 @@ jobs:
 
       - name: Install dependencies
         run: flutter pub get
+
+      - name: Analyze Dart code
+        run: flutter analyze
 
       - name: Build release APK
         run: flutter build apk --release
