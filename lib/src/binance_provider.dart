@@ -1,5 +1,4 @@
 
-import 'dart:async';
 import 'dart:convert';
 
 import 'package:http/http.dart' as http;
@@ -15,12 +14,15 @@ import 'engine.dart';
 // No API key | No real orders
 // =====================================================
 
-class BinanceProvider implements MarketProvider, CandleMarketProvider {
+class BinanceProvider implements MarketProvider, CandleMarketProvider, MarketProviderDiagnostics {
   final http.Client _client;
   final String baseUrl;
   final Duration timeout;
 
   bool _closed = false;
+
+  @override
+  String? lastError;
   DateTime? _lastRequestTime;
   DateTime? _blockedUntil;
 
@@ -91,8 +93,11 @@ class BinanceProvider implements MarketProvider, CandleMarketProvider {
         Uri.parse('$baseUrl/api/v3/ping'),
       );
 
-      return response.statusCode == 200;
-    } catch (_) {
+      final ok = response.statusCode == 200;
+      lastError = ok ? null : 'HTTP ${response.statusCode}';
+      return ok;
+    } catch (error) {
+      lastError = error.toString();
       return false;
     }
   }
@@ -102,38 +107,68 @@ class BinanceProvider implements MarketProvider, CandleMarketProvider {
     if (_closed || symbol.trim().isEmpty) return null;
 
     final normalized = symbol.trim().toUpperCase();
+    final hosts = <String>[
+      baseUrl,
+      'https://data-api.binance.vision',
+    ];
+    final failures = <String>[];
 
-    try {
-      final uri = Uri.parse(
-        '$baseUrl/api/v3/ticker/bookTicker',
-      ).replace(
-        queryParameters: {'symbol': normalized},
-      );
+    for (final host in hosts.toSet()) {
+      try {
+        // Build the URI from a clean HTTPS authority and exactly one
+        // query parameter. This avoids carrying query fragments from a
+        // configured base URL into the public market-data request.
+        final authority = Uri.parse(host);
+        final uri = Uri.https(
+          authority.host,
+          '/api/v3/ticker/bookTicker',
+          {'symbol': normalized},
+        );
 
-      final response = await _get(uri);
-      final data = jsonDecode(response.body);
+        final response = await _get(uri);
+        final decoded = jsonDecode(response.body);
 
-      if (data is! Map<String, dynamic>) return null;
+        // Binance can return API errors in a JSON body even with HTTP 200.
+        if (decoded is Map && decoded['code'] != null) {
+          throw StateError(
+            'Binance API ${decoded['code']}: ${decoded['msg'] ?? 'unknown error'}',
+          );
+        }
 
-      final bid = double.tryParse(data['bidPrice']?.toString() ?? '');
-      final ask = double.tryParse(data['askPrice']?.toString() ?? '');
+        if (decoded is! Map<String, dynamic>) {
+          throw StateError('Binance returned an unexpected quote response');
+        }
 
-      if (bid == null || ask == null) return null;
+        final bid = double.tryParse(decoded['bidPrice']?.toString() ?? '');
+        final ask = double.tryParse(decoded['askPrice']?.toString() ?? '');
 
-      final quote = MarketQuote(
-        providerId: id,
-        symbol: normalized,
-        market: MarketType.crypto,
-        bid: bid,
-        ask: ask,
-        volume: 0,
-        timestamp: DateTime.now(),
-      );
+        if (bid == null || ask == null) {
+          throw StateError('Binance quote response has no valid bid/ask');
+        }
 
-      return quote.isValid ? quote : null;
-    } catch (_) {
-      return null;
+        final quote = MarketQuote(
+          providerId: id,
+          symbol: normalized,
+          market: MarketType.crypto,
+          bid: bid,
+          ask: ask,
+          volume: 0,
+          timestamp: DateTime.now(),
+        );
+
+        if (!quote.isValid) {
+          throw StateError('Binance quote is invalid');
+        }
+
+        lastError = null;
+        return quote;
+      } catch (error) {
+        failures.add('${Uri.parse(host).host}: $error');
+      }
     }
+
+    lastError = failures.join(' | ');
+    return null;
   }
 
   // -------------------- HISTORICAL CANDLES --------------------

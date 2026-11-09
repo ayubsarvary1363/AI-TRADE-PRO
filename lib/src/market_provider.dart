@@ -66,6 +66,16 @@ abstract class MarketProvider {
 
   MarketType get market;
 
+  // Safe optional diagnostics: providers that implement
+  // MarketProviderDiagnostics expose their latest network/API error.
+  String? get lastError {
+    final provider = this;
+    if (provider is MarketProviderDiagnostics) {
+      return provider.lastError;
+    }
+    return null;
+  }
+
   Future<bool> checkConnection();
 
   Future<MarketQuote?> fetchQuote(String symbol);
@@ -197,4 +207,10 @@ class MarketConnectionChecker {
       }),
     );
   }
+}
+
+
+// Optional diagnostics exposed by network-backed market providers.
+abstract class MarketProviderDiagnostics {
+  String? get lastError;
 }

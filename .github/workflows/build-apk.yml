@@ -6,6 +6,7 @@ on:
   push:
     branches:
       - main
+      - 'fix/**'
 
 permissions:
   contents: read
@@ -37,8 +38,77 @@ jobs:
           rm -rf android
           flutter create --platforms=android --org com.aitradepro --project-name ai_trade_pro .
 
+      - name: Ensure Android release network permissions
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          import xml.etree.ElementTree as ET
+          p = Path("android/app/src/main/AndroidManifest.xml")
+          ET.register_namespace("android", "http://schemas.android.com/apk/res/android")
+          tree = ET.parse(p)
+          root = tree.getroot()
+          ns = "{http://schemas.android.com/apk/res/android}"
+          required = [
+              "android.permission.INTERNET",
+              "android.permission.ACCESS_NETWORK_STATE",
+          ]
+          existing = {node.get(ns + "name") for node in root.findall("uses-permission")}
+          for permission in required:
+              if permission not in existing:
+                  node = ET.Element("uses-permission")
+                  node.set(ns + "name", permission)
+                  root.insert(0, node)
+          tree.write(p, encoding="utf-8", xml_declaration=True)
+          print(p.read_text())
+          PY
+          grep -q 'android.permission.INTERNET' android/app/src/main/AndroidManifest.xml
+
+      - name: Select reachable Gradle distribution mirror
+        run: |
+          set -e
+          selected=""
+          for url in \
+            "https://repo.huaweicloud.com/gradle/gradle-8.3-bin.zip" \
+            "https://mirrors.cloud.tencent.com/gradle/gradle-8.3-bin.zip"; do
+            echo "Checking $url"
+            if curl -fsSIL --max-time 45 "$url" >/dev/null; then
+              selected="$url"
+              break
+            fi
+          done
+          if [ -z "$selected" ]; then
+            echo "No Gradle distribution mirror responded successfully."
+            exit 1
+          fi
+          echo "Selected Gradle mirror: $selected"
+          python3 - "$selected" <<'PY'
+          import sys
+          from pathlib import Path
+          p = Path("android/gradle/wrapper/gradle-wrapper.properties")
+          lines = p.read_text().splitlines()
+          url = sys.argv[1].replace(":", "\\:")
+          lines = [("distributionUrl=" + url if line.startswith("distributionUrl=") else line) for line in lines]
+          p.write_text("\n".join(lines) + "\n")
+          print(p.read_text())
+          PY
+
+      - name: Add Maven mirror fallback for Android dependencies
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path("android/settings.gradle")
+          s = p.read_text()
+          mirror = "        maven { url 'https://maven.aliyun.com/repository/central' }\n        maven { url 'https://repo.huaweicloud.com/repository/maven/' }"
+          s = s.replace("mavenCentral()", "mavenCentral()\n" + mirror)
+          p.write_text(s)
+          print(p.read_text())
+          PY
+
       - name: Install dependencies
         run: flutter pub get
+
+      - name: Analyze Dart code
+        run: flutter analyze
 
       - name: Build release APK
         run: flutter build apk --release

@@ -31,6 +31,15 @@ class TradingController extends ChangeNotifier {
 
   Timer? _quoteTimer;
   Timer? _candleTimer;
+  Timer? _scannerTimer;
+  bool _scanningMarkets = false;
+  bool _refreshingAllQuotes = false;
+
+  static const List<String> supportedSymbols = [
+    'BTCUSDT', 'ETHUSDT', 'BNBUSDT', 'SOLUSDT',
+    'XRPUSDT', 'ADAUSDT', 'DOGEUSDT',
+  ];
+  final Map<String, DateTime> _lastProcessedCandles = {};
 
   bool _running = false;
   bool _refreshingQuote = false;
@@ -128,17 +137,22 @@ class TradingController extends ChangeNotifier {
     notifyListeners();
 
     await refreshMarket();
-
+    if (!_running || _disposed) return;
+    await scanAllMarkets();
     if (!_running || _disposed) return;
 
     _quoteTimer = Timer.periodic(
       const Duration(seconds: 2),
-      (_) => refreshQuote(),
+      (_) => refreshAllQuotes(),
     );
 
     _candleTimer = Timer.periodic(
       const Duration(seconds: 30),
       (_) => refreshCandles(),
+    );
+    _scannerTimer = Timer.periodic(
+      const Duration(seconds: 30),
+      (_) => scanAllMarkets(),
     );
   }
 
@@ -149,9 +163,11 @@ class TradingController extends ChangeNotifier {
 
     _quoteTimer?.cancel();
     _candleTimer?.cancel();
+    _scannerTimer?.cancel();
 
     _quoteTimer = null;
     _candleTimer = null;
+    _scannerTimer = null;
 
     status = 'ربات آزمایشی متوقف شد';
 
@@ -212,9 +228,8 @@ class TradingController extends ChangeNotifier {
 
       _updateErrorStatus();
 
-      if (lastError == null && _running) {
-        status = 'قیمت بازار به‌روزرسانی شد';
-      }
+      // Keep the trading decision/status visible; quote refreshes must not
+      // overwrite it every two seconds.
     } catch (error) {
       if (!_disposed) {
         _quoteHealthy = false;
@@ -224,6 +239,53 @@ class TradingController extends ChangeNotifier {
     } finally {
       _refreshingQuote = false;
 
+      if (!_disposed) notifyListeners();
+    }
+  }
+
+  Future<void> refreshAllQuotes() async {
+    if (_disposed || !_running || _refreshingAllQuotes) return;
+    _refreshingAllQuotes = true;
+
+    try {
+      final quotes = await Future.wait(
+        supportedSymbols.map((item) async {
+          try {
+            return await marketHub.getBestQuote(
+              item,
+              market: MarketType.crypto,
+            );
+          } catch (_) {
+            return null;
+          }
+        }),
+      );
+
+      if (_disposed) return;
+
+      for (int i = 0; i < supportedSymbols.length; i++) {
+        final item = supportedSymbols[i];
+        final quote = quotes[i];
+        if (quote == null ||
+            !quote.isValid ||
+            quote.symbol.toUpperCase() != item ||
+            !quote.isFresh(maximumAge: const Duration(seconds: 15))) {
+          continue;
+        }
+
+        _lastPrices[item] = quote.midPrice;
+        if (item == symbol) {
+          latestQuote = quote;
+          _quoteHealthy = true;
+        }
+      }
+
+      portfolio.updateEquity(_currentPrices);
+      if (symbol == 'BTCUSDT' && latestQuote == null) {
+        _quoteHealthy = false;
+      }
+    } finally {
+      _refreshingAllQuotes = false;
       if (!_disposed) notifyListeners();
     }
   }
@@ -262,12 +324,8 @@ class TradingController extends ChangeNotifier {
 
       _updateErrorStatus();
 
-      if (_quoteHealthy && _candlesHealthy) {
-        _processNewSignal();
-
-        if (lastError == null && !_running) {
-          status = 'اطلاعات بازار دریافت شد';
-        }
+      if (lastError == null && !_running) {
+        status = 'اطلاعات بازار دریافت شد';
       }
     } catch (error) {
       if (!_disposed) {
@@ -282,126 +340,139 @@ class TradingController extends ChangeNotifier {
     }
   }
 
-  // -------------------- PAPER EXECUTION --------------------
+  // -------------------- MULTI-MARKET PAPER SCANNER --------------------
 
-  void _processNewSignal() {
-    if (!_running ||
-        latestSignal == null ||
-        candles.isEmpty ||
-        !hasValidPrice ||
-        !hasValidCandles) {
-      return;
-    }
+  Future<void> scanAllMarkets() async {
+    if (_disposed || !_running || _scanningMarkets) return;
+    _scanningMarkets = true;
 
-    final signal = latestSignal!;
-    final candleTime = candles.last.time;
+    int checked = 0;
+    int traded = 0;
+    final errors = <String>[];
 
-    if (_lastProcessedCandle == candleTime) return;
+    try {
+      final results = await Future.wait(
+        supportedSymbols.map((item) => _scanSymbol(item)),
+      );
 
-    _lastProcessedCandle = candleTime;
+      for (final result in results) {
+        if (result == 'TRADED') {
+          traded++;
+          checked++;
+        } else if (result == 'OK' || result == 'HOLD') {
+          checked++;
+        } else if (result != null) {
+          errors.add(result);
+        }
+      }
 
-    if (signal.direction == SignalDirection.hold ||
-        signal.confidence < 0.60 ||
-        currentPrice <= 0) {
-      status = 'سیگنال معتبر برای معامله وجود ندارد';
-      return;
-    }
-
-    final currentEquity = portfolio.updateEquity(
-      _currentPrices,
-    );
-
-    final canTrade = riskManager.canTrade(
-      currentEquity: currentEquity,
-      dayStartingEquity: portfolio.dayStartingEquity,
-      peakEquity: portfolio.peakEquity,
-    );
-
-    if (!canTrade) {
-      stop();
-      status = 'توقف خودکار به دلیل محدودیت ریسک';
-      return;
-    }
-
-    if (signal.direction == SignalDirection.buy) {
-      _executePaperBuy(signal);
-    } else if (signal.direction == SignalDirection.sell) {
-      _executePaperSell();
+      if (!_disposed && _running) {
+        status = traded > 0
+            ? '$traded معامله آزمایشی جدید در بررسی چندارزی ثبت شد'
+            : 'بررسی چندارزی انجام شد؛ $checked از ${supportedSymbols.length} ارز بررسی شدند، فعلاً سیگنال قابل اجرا وجود ندارد';
+        if (errors.isNotEmpty && checked == 0) {
+          status = 'دریافت اطلاعات چندارزی ناموفق بود';
+          lastError = errors.take(3).join(' | ');
+        }
+        notifyListeners();
+      }
+    } catch (error) {
+      if (!_disposed) {
+        status = 'خطا در بررسی هم‌زمان بازارها';
+        lastError = error.toString();
+        notifyListeners();
+      }
+    } finally {
+      _scanningMarkets = false;
     }
   }
 
-  void _executePaperBuy(TradeSignal signal) {
-    if (!hasValidPrice) {
-      status = 'قیمت معتبر برای خرید وجود ندارد';
-      return;
+  Future<String?> _scanSymbol(String item) async {
+    try {
+      final quote = await marketHub.getBestQuote(
+        item,
+        market: MarketType.crypto,
+      );
+      if (_disposed || !_running) return null;
+
+      if (quote == null ||
+          !quote.isValid ||
+          quote.symbol.toUpperCase() != item ||
+          !quote.isFresh(maximumAge: const Duration(seconds: 15))) {
+        return '$item: قیمت معتبر دریافت نشد';
+      }
+
+      final price = quote.midPrice;
+      _lastPrices[item] = price;
+
+      final data = await marketHub.fetchCandles(
+        item,
+        interval,
+        market: MarketType.crypto,
+        limit: 200,
+      );
+      if (_disposed || !_running) return null;
+      if (data.length < 30) return '$item: کندل کافی دریافت نشد';
+
+      final signal = signalEngine.analyze(data, style: style);
+      final candleTime = data.last.time;
+      if (_lastProcessedCandles[item] == candleTime) return 'HOLD';
+
+      if (signal.direction == SignalDirection.hold ||
+          signal.confidence < 0.60) {
+        return 'HOLD';
+      }
+
+      // One executable decision per symbol per candle.
+      final currentEquity = portfolio.updateEquity(_currentPrices);
+      final canTrade = riskManager.canTrade(
+        currentEquity: currentEquity,
+        dayStartingEquity: portfolio.dayStartingEquity,
+        peakEquity: portfolio.peakEquity,
+      );
+      if (!canTrade) {
+        stop();
+        status = 'توقف خودکار به دلیل محدودیت ریسک';
+        return null;
+      }
+
+      if (signal.direction == SignalDirection.buy) {
+        if (portfolio.positions.containsKey(item)) return 'HOLD';
+
+        final entry = quote.ask;
+        if (entry <= 0) return '$item: قیمت خرید نامعتبر است';
+        final quantity = riskManager.calculatePositionSize(
+          equity: currentEquity,
+          entryPrice: entry,
+          stopPrice: entry * 0.98,
+          confidence: signal.confidence,
+        );
+        if (quantity <= 0) return '$item: حجم خرید صفر است';
+
+        _lastProcessedCandles[item] = candleTime;
+        return portfolio.buy(
+          symbol: item,
+          price: entry,
+          quantity: quantity,
+        ) ? 'TRADED' : '$item: موجودی نقدی کافی نیست';
+      }
+
+      if (signal.direction == SignalDirection.sell) {
+        final position = portfolio.positions[item];
+        if (position == null) return 'HOLD';
+
+        _lastProcessedCandles[item] = candleTime;
+        return portfolio.sell(
+          symbol: item,
+          price: quote.bid,
+          quantity: position.quantity,
+        ) ? 'TRADED' : '$item: فروش ناموفق بود';
+      }
+
+      return 'HOLD';
+    } catch (error) {
+      return '$item: $error';
     }
-
-    if (portfolio.positions.containsKey(symbol)) {
-      status = 'برای این نماد موقعیت خرید باز وجود دارد';
-      return;
-    }
-
-    final price = latestQuote!.ask;
-
-    if (price <= 0) {
-      status = 'قیمت خرید معتبر نیست';
-      return;
-    }
-
-    final stopPrice = price * 0.98;
-
-    final quantity = riskManager.calculatePositionSize(
-      equity: portfolio.equity(_currentPrices),
-      entryPrice: price,
-      stopPrice: stopPrice,
-      confidence: signal.confidence,
-    );
-
-    if (quantity <= 0) {
-      status = 'حجم معامله با محدودیت ریسک سازگار نیست';
-      return;
-    }
-
-    final success = portfolio.buy(
-      symbol: symbol,
-      price: price,
-      quantity: quantity,
-    );
-
-    status = success
-        ? 'خرید آزمایشی ثبت شد'
-        : 'موجودی برای خرید کافی نیست';
-  }
-
-  void _executePaperSell() {
-    if (!hasValidPrice) {
-      status = 'قیمت معتبر برای فروش وجود ندارد';
-      return;
-    }
-
-    final position = portfolio.positions[symbol];
-
-    if (position == null) {
-      status = 'موقعیت بازی برای فروش وجود ندارد';
-      return;
-    }
-
-    final price = latestQuote!.bid;
-
-    if (price <= 0) {
-      status = 'قیمت فروش معتبر نیست';
-      return;
-    }
-
-    final success = portfolio.sell(
-      symbol: symbol,
-      price: price,
-      quantity: position.quantity,
-    );
-
-    status = success
-        ? 'فروش آزمایشی ثبت شد'
-        : 'ثبت فروش ناموفق بود';
   }
 
   // -------------------- SETTINGS --------------------
@@ -423,6 +494,7 @@ class TradingController extends ChangeNotifier {
     _candlesHealthy = false;
 
     _lastProcessedCandle = null;
+    _lastProcessedCandles.remove(nextSymbol);
 
     status = 'در حال دریافت اطلاعات $symbol';
 
@@ -445,6 +517,7 @@ class TradingController extends ChangeNotifier {
 
     _candlesHealthy = false;
     _lastProcessedCandle = null;
+    _lastProcessedCandles.clear();
 
     status = 'در حال دریافت کندل‌های $interval';
 
@@ -489,6 +562,7 @@ class TradingController extends ChangeNotifier {
     _candlesHealthy = false;
 
     _lastProcessedCandle = null;
+    _lastProcessedCandles.clear();
 
     lastError = null;
     status = 'حساب آزمایشی بازنشانی شد';
@@ -506,6 +580,7 @@ class TradingController extends ChangeNotifier {
 
     _quoteTimer?.cancel();
     _candleTimer?.cancel();
+    _scannerTimer?.cancel();
 
     unawaited(marketHub.dispose());
 
