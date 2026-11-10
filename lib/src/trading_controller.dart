@@ -7,6 +7,7 @@ import 'engine.dart';
 import 'exchange_router.dart';
 import 'market_hub.dart';
 import 'market_provider.dart';
+import 'market_scanner.dart';
 
 // =====================================================
 // AI TRADE PRO
@@ -32,11 +33,16 @@ class TradingController extends ChangeNotifier {
 
   Timer? _quoteTimer;
   Timer? _candleTimer;
+  Timer? _scanTimer;
 
   bool _running = false;
   bool _refreshingQuote = false;
   bool _refreshingCandles = false;
   bool _disposed = false;
+  bool _scanningMarkets = false;
+
+  late final MarketScanner _scanner;
+  String scannerStatus = 'اسکن خودکار بازار هنوز شروع نشده است';
 
   bool _quoteHealthy = false;
   bool _candlesHealthy = false;
@@ -66,7 +72,12 @@ class TradingController extends ChangeNotifier {
 
   TradingController({
     required this.marketHub,
-  });
+  }) {
+    _scanner = MarketScanner(
+      marketHub: marketHub,
+      signalEngine: signalEngine,
+    );
+  }
 
   bool get isRunning => _running;
 
@@ -155,6 +166,14 @@ class TradingController extends ChangeNotifier {
       const Duration(seconds: 30),
       (_) => refreshCandles(),
     );
+
+    _scanner.reset();
+    scannerStatus = 'اسکن هوشمند ۵۵ نماد رمزارز و فارکس آغاز شد';
+    _scanTimer = Timer.periodic(
+      const Duration(seconds: 20),
+      (_) => scanMarketUniverse(),
+    );
+    unawaited(scanMarketUniverse());
   }
 
   // -------------------- STOP --------------------
@@ -164,9 +183,11 @@ class TradingController extends ChangeNotifier {
 
     _quoteTimer?.cancel();
     _candleTimer?.cancel();
+    _scanTimer?.cancel();
 
     _quoteTimer = null;
     _candleTimer = null;
+    _scanTimer = null;
 
     status = 'ربات آزمایشی متوقف شد';
 
@@ -293,12 +314,8 @@ class TradingController extends ChangeNotifier {
         return;
       }
 
-      if (_quoteHealthy && _candlesHealthy) {
-        _processNewSignal();
-
-        if (lastError == null && !_running) {
-          status = 'اطلاعات بازار دریافت شد';
-        }
+      if (lastError == null && !_running) {
+        status = 'اطلاعات بازار دریافت شد';
       }
     } catch (error) {
       if (!_disposed) {
@@ -310,6 +327,157 @@ class TradingController extends ChangeNotifier {
       _refreshingCandles = false;
 
       if (!_disposed) notifyListeners();
+    }
+  }
+
+  // -------------------- AUTOMATIC WHOLE-MARKET SCANNER --------------------
+
+  Future<void> scanMarketUniverse() async {
+    if (_disposed || !_running || _scanningMarkets) return;
+
+    _scanningMarkets = true;
+    try {
+      final cycle = await _scanner.scanNextBatch(
+        interval: interval,
+        style: style,
+        batchSize: 4,
+      );
+
+      for (final result in cycle.batch) {
+        _lastPrices[result.symbol] = result.quote.midPrice;
+
+        final position = portfolio.positions[result.symbol];
+        if (position != null) {
+          if (result.isNewCandle &&
+              result.signal.direction == SignalDirection.sell) {
+            final closed = portfolio.sell(
+              symbol: result.symbol,
+              price: result.quote.bid,
+              quantity: position.quantity,
+            );
+            if (closed) {
+              _clearProtectiveState();
+              status = 'سیگنال خروج برای ${result.symbol} تأیید شد؛ موقعیت بسته شد';
+            }
+          } else {
+            _manageOpenPositionFor(
+              result.symbol,
+              result.quote,
+              result.candles,
+            );
+          }
+        }
+      }
+
+      portfolio.updateEquity(_currentPrices);
+
+      scannerStatus =
+          'اسکن مرحله‌ای بازار: ${cycle.scanned} از ${cycle.total} نماد';
+
+      if (cycle.cycleCompleted) {
+        final candidate = cycle.bestOpportunity;
+        if (candidate == null) {
+          scannerStatus = 'اسکن کامل شد؛ فرصت معتبر و کم‌ریسکی پیدا نشد';
+          if (portfolio.positions.isEmpty) {
+            status = 'در کل بازار فرصت مناسب معامله پیدا نشد';
+          }
+        } else if (portfolio.positions.isNotEmpty) {
+          scannerStatus = 'بهترین فرصت ${candidate.symbol} شناسایی شد؛ تا بسته‌شدن موقعیت فعلی معامله جدیدی باز نمی‌شود';
+        } else {
+          final freshQuote = await marketHub.getBestQuote(
+            candidate.symbol,
+            market: candidate.market,
+          );
+          if (freshQuote == null ||
+              !freshQuote.isValid ||
+              !freshQuote.isFresh(
+                maximumAge: const Duration(seconds: 15),
+              ) ||
+              freshQuote.symbol.toUpperCase() !=
+                  candidate.symbol.toUpperCase()) {
+            scannerStatus = 'فرصت ${candidate.symbol} به دلیل نبود قیمت تازه رد شد';
+          } else {
+            _executeScannerBuy(candidate, freshQuote);
+          }
+        }
+      }
+    } catch (error) {
+      scannerStatus = 'خطا در اسکن بازار: $error';
+    } finally {
+      _scanningMarkets = false;
+      if (!_disposed) notifyListeners();
+    }
+  }
+
+  void _executeScannerBuy(
+    MarketScanResult candidate,
+    MarketQuote quote,
+  ) {
+    if (!_running ||
+        portfolio.positions.isNotEmpty ||
+        candidate.signal.direction != SignalDirection.buy ||
+        candidate.signal.confidence < 0.60 ||
+        !quote.isFresh(maximumAge: const Duration(seconds: 15))) {
+      return;
+    }
+
+    final currentEquity = portfolio.updateEquity(_currentPrices);
+    final canTrade = riskManager.canTrade(
+      currentEquity: currentEquity,
+      dayStartingEquity: portfolio.dayStartingEquity,
+      peakEquity: portfolio.peakEquity,
+    );
+    if (!canTrade) {
+      stop();
+      status = 'توقف خودکار به دلیل محدودیت ریسک';
+      return;
+    }
+
+    final price = quote.ask;
+    if (price <= 0 || !price.isFinite) return;
+
+    final atr = _calculateAtr(candidate.candles, 14);
+    if (atr <= 0 || !atr.isFinite) {
+      scannerStatus = 'فرصت ${candidate.symbol} به دلیل ATR نامعتبر رد شد';
+      return;
+    }
+
+    final riskDistance = (atr * _atrStopMultiplier)
+        .clamp(price * 0.008, price * 0.04)
+        .toDouble();
+    final stopPrice = price - riskDistance;
+    final takeProfitPrice = price + riskDistance * 2.0;
+    final quantity = riskManager.calculatePositionSize(
+      equity: currentEquity,
+      entryPrice: price,
+      stopPrice: stopPrice,
+      confidence: candidate.signal.confidence,
+    );
+
+    if (quantity <= 0 ||
+        (price * quantity * (1 + portfolio.feeRate)) >
+            portfolio.cashUsdt) {
+      scannerStatus = 'فرصت ${candidate.symbol} با موجودی و محدودیت ریسک سازگار نبود';
+      return;
+    }
+
+    final success = portfolio.buy(
+      symbol: candidate.symbol,
+      price: price,
+      quantity: quantity,
+      stopLoss: stopPrice,
+      takeProfit: takeProfitPrice,
+      targetPoints: takeProfitPrice - price,
+    );
+
+    if (success) {
+      _activeStopPrice = stopPrice;
+      _activeTakeProfitPrice = takeProfitPrice;
+      _initialRiskDistance = riskDistance;
+      _highestPriceSinceEntry = price;
+      _lastPrices[candidate.symbol] = quote.midPrice;
+      scannerStatus = 'بهترین فرصت انتخاب شد: ${candidate.symbol}';
+      status = 'خرید آزمایشی خودکار روی ${candidate.symbol} ثبت شد';
     }
   }
 
@@ -484,16 +652,25 @@ class TradingController extends ChangeNotifier {
 
   void _manageOpenPosition() {
     if (!_running || !hasValidPrice) return;
-    final position = portfolio.positions[symbol];
+    _manageOpenPositionFor(symbol, latestQuote!, candles);
+  }
+
+  void _manageOpenPositionFor(
+    String positionSymbol,
+    MarketQuote quote,
+    List<Candle> positionCandles,
+  ) {
+    if (!_running) return;
+    final position = portfolio.positions[positionSymbol];
     if (position == null || _activeStopPrice == null) return;
 
-    final bid = latestQuote!.bid;
+    final bid = quote.bid;
     if (bid <= 0 || !bid.isFinite) return;
 
     final previousHigh = _highestPriceSinceEntry ?? position.averageEntryPrice;
     if (bid > previousHigh) _highestPriceSinceEntry = bid;
     final high = _highestPriceSinceEntry ?? bid;
-    final atr = _calculateAtr(candles, 14);
+    final atr = _calculateAtr(positionCandles, 14);
     final initialRisk = _initialRiskDistance ??
         (position.averageEntryPrice - _activeStopPrice!);
 
@@ -515,7 +692,7 @@ class TradingController extends ChangeNotifier {
 
     if (_activeTakeProfitPrice != null && bid >= _activeTakeProfitPrice!) {
       final success = portfolio.sell(
-        symbol: symbol,
+        symbol: positionSymbol,
         price: bid,
         quantity: position.quantity,
       );
@@ -529,7 +706,7 @@ class TradingController extends ChangeNotifier {
 
     if (bid <= _activeStopPrice!) {
       final success = portfolio.sell(
-        symbol: symbol,
+        symbol: positionSymbol,
         price: bid,
         quantity: position.quantity,
       );
@@ -606,6 +783,7 @@ class TradingController extends ChangeNotifier {
 
     interval = value;
     _awaitNextClosedCandle = true;
+    _scanner.reset();
 
     latestSignal = null;
     candles = [];
@@ -628,6 +806,7 @@ class TradingController extends ChangeNotifier {
     if (_disposed || style == value) return;
 
     style = value;
+    _scanner.reset();
     latestSignal = null;
 
     notifyListeners();
@@ -675,6 +854,7 @@ class TradingController extends ChangeNotifier {
 
     _quoteTimer?.cancel();
     _candleTimer?.cancel();
+    _scanTimer?.cancel();
 
     unawaited(marketHub.dispose());
 
