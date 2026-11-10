@@ -222,7 +222,7 @@ class MarketScanner {
       _bestInCycle = null;
     }
 
-    return MarketScanCycle(
+    final cycle = MarketScanCycle(
       batch: valid, bestOpportunity: best, cycleCompleted: completed,
       scanned: end,
       total: universe.length,
@@ -233,5 +233,15 @@ class MarketScanner {
       lowConfidence: _lowConfidence,
       buySignals: _buySignals,
     );
+
+    if (completed) {
+      _quoteRejected = 0;
+      _candleRejected = 0;
+      _noNewCandle = 0;
+      _noBuySignal = 0;
+      _lowConfidence = 0;
+      _buySignals = 0;
+    }
+    return cycle;
   }
 }
