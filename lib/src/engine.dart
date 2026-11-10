@@ -116,7 +116,7 @@ class SignalEngine {
     for (int i = data.length - period; i < data.length; i++) {
       final c = data[i], previousClose = data[i - 1].close;
       total += [c.high - c.low, (c.high - previousClose).abs(),
-        (c.low - previousClose).abs()].reduce(max);
+        (c.low - previousClose).abs()].reduce((a, b) => a > b ? a : b);
     }
     return total / period;
   }
@@ -130,7 +130,7 @@ class SignalEngine {
       plusSum += up > down && up > 0 ? up : 0;
       minusSum += down > up && down > 0 ? down : 0;
       trSum += [c.high - c.low, (c.high - p.close).abs(),
-        (c.low - p.close).abs()].reduce(max);
+        (c.low - p.close).abs()].reduce((a, b) => a > b ? a : b);
     }
     if (trSum <= 0) return 0;
     final plusDi = 100 * plusSum / trSum;
@@ -180,7 +180,7 @@ class SignalEngine {
       rsiValues.add(_rsi(values.sublist(0, i + 1), rsiPeriod));
     }
     final window = rsiValues.sublist(rsiValues.length - stochPeriod);
-    final low = window.reduce(min), high = window.reduce(max);
+    final low = window.reduce(min), high = window.reduce((a, b) => a > b ? a : b);
     if ((high - low).abs() < 1e-12) return 50;
     return 100 * (window.last - low) / (high - low);
   }
@@ -218,7 +218,7 @@ class SignalEngine {
 
     double midpoint(int period) {
       final sample = valid.sublist(valid.length - period);
-      return (sample.map((c) => c.high).reduce(max) +
+      return (sample.map((c) => c.high).reduce((a, b) => a > b ? a : b) +
         sample.map((c) => c.low).reduce(min)) / 2;
     }
     final tenkan = midpoint(9), kijun = midpoint(26);
