@@ -26,6 +26,7 @@ class TradingController extends ChangeNotifier {
 
   TradingStyle style = TradingStyle.mediumTerm;
 
+  MarketType selectedMarket = MarketType.crypto;
   String symbol = 'BTCUSDT';
   String interval = '1h';
 
@@ -190,7 +191,7 @@ class TradingController extends ChangeNotifier {
     try {
       final quote = await marketHub.getBestQuote(
         symbol,
-        market: MarketType.crypto,
+        market: selectedMarket,
       );
 
       if (_disposed) return;
@@ -249,7 +250,7 @@ class TradingController extends ChangeNotifier {
       final result = await marketHub.fetchCandles(
         symbol,
         interval,
-        market: MarketType.crypto,
+        market: selectedMarket,
         limit: 200,
       );
 
@@ -508,6 +509,25 @@ class TradingController extends ChangeNotifier {
   }
 
   // -------------------- SETTINGS --------------------
+
+  void changeMarket(MarketType value) {
+    if (_disposed || selectedMarket == value ||
+        marketHub.getProviders(value).isEmpty) return;
+
+    selectedMarket = value;
+    symbol = value == MarketType.forex ? 'EURUSD=X' : 'BTCUSDT';
+    latestQuote = null;
+    latestSignal = null;
+    candles = [];
+    _quoteHealthy = false;
+    _candlesHealthy = false;
+    _lastProcessedCandle = null;
+    status = 'در حال دریافت اطلاعات بازار ${value == MarketType.forex ? 'فارکس' : 'رمزارز'}';
+    _updateErrorStatus();
+    notifyListeners();
+
+    if (_running) refreshMarket();
+  }
 
   void changeSymbol(String value) {
     if (_disposed || value.trim().isEmpty) return;
