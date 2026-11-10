@@ -93,7 +93,7 @@ class TradingController extends ChangeNotifier {
         );
   }
 
-  bool get hasValidCandles => candles.length >= 30;
+  bool get hasValidCandles => candles.length >= 60;
 
   double? get activeStopPrice => _activeStopPrice;
 
@@ -330,7 +330,7 @@ class TradingController extends ChangeNotifier {
 
       if (_disposed || requestedSymbol != symbol || requestedMarket != selectedMarket || requestedInterval != interval) return;
 
-      if (result.length < 30) {
+      if (result.length < 60) {
         _candlesHealthy = false;
         _updateErrorStatus();
         return;
