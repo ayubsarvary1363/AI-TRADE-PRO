@@ -1,0 +1,207 @@
+import 'engine.dart';
+import 'exchange_router.dart';
+import 'market_hub.dart';
+import 'market_provider.dart';
+
+class MarketScanResult {
+  final String symbol;
+  final MarketType market;
+  final MarketQuote quote;
+  final List<Candle> candles;
+  final TradeSignal signal;
+  final bool isNewCandle;
+
+  const MarketScanResult({
+    required this.symbol,
+    required this.market,
+    required this.quote,
+    required this.candles,
+    required this.signal,
+    required this.isNewCandle,
+  });
+}
+
+class MarketScanCycle {
+  final List<MarketScanResult> batch;
+  final MarketScanResult? bestOpportunity;
+  final bool cycleCompleted;
+  final int scanned;
+  final int total;
+
+  const MarketScanCycle({
+    required this.batch,
+    required this.bestOpportunity,
+    required this.cycleCompleted,
+    required this.scanned,
+    required this.total,
+  });
+}
+
+class MarketScanner {
+  final MarketHub marketHub;
+  final SignalEngine signalEngine;
+
+  MarketScanner({
+    required this.marketHub,
+    required this.signalEngine,
+  });
+
+  static const List<String> cryptoSymbols = [
+    'BTCUSDT', 'ETHUSDT', 'BNBUSDT', 'SOLUSDT', 'XRPUSDT',
+    'ADAUSDT', 'DOGEUSDT', 'LTCUSDT', 'BCHUSDT', 'LINKUSDT',
+    'DOTUSDT', 'AVAXUSDT', 'XLMUSDT', 'ATOMUSDT', 'UNIUSDT',
+    'ETCUSDT', 'FILUSDT', 'AAVEUSDT', 'NEARUSDT', 'ALGOUSDT',
+    'TRXUSDT', 'SHIBUSDT', 'PEPEUSDT', 'SUIUSDT', 'TONUSDT',
+    'ICPUSDT', 'INJUSDT', 'OPUSDT', 'ARBUSDT', 'APTUSDT',
+  ];
+
+  static const List<String> forexSymbols = [
+    'EURUSD=X', 'GBPUSD=X', 'USDJPY=X', 'AUDUSD=X', 'USDCAD=X',
+    'USDCHF=X', 'NZDUSD=X', 'EURGBP=X', 'EURJPY=X', 'EURCHF=X',
+    'EURAUD=X', 'EURCAD=X', 'EURNZD=X', 'GBPJPY=X', 'GBPCHF=X',
+    'GBPAUD=X', 'GBPCAD=X', 'GBPNZD=X', 'AUDJPY=X', 'AUDNZD=X',
+    'AUDCAD=X', 'AUDCHF=X', 'NZDJPY=X', 'CADJPY=X', 'CHFJPY=X',
+  ];
+
+  final Map<String, DateTime> _lastCandleBySymbol = {};
+  int _cursor = 0;
+  MarketScanResult? _bestInCycle;
+  int _validScannedInCycle = 0;
+
+  int get totalSymbols => cryptoSymbols.length + forexSymbols.length;
+
+  void reset() {
+    _lastCandleBySymbol.clear();
+    _cursor = 0;
+    _bestInCycle = null;
+    _validScannedInCycle = 0;
+  }
+
+  Duration _intervalDuration(String interval) {
+    final match = RegExp(r'^(\\d+)(s|m|h|d)$').firstMatch(interval);
+    if (match == null) return const Duration(hours: 1);
+    final amount = int.tryParse(match.group(1)!) ?? 1;
+    switch (match.group(2)) {
+      case 's': return Duration(seconds: amount);
+      case 'm': return Duration(minutes: amount);
+      case 'h': return Duration(hours: amount);
+      case 'd': return Duration(days: amount);
+      default: return const Duration(hours: 1);
+    }
+  }
+
+  Future<MarketScanResult?> _scanOne(
+    String symbol,
+    MarketType market,
+    String interval,
+    TradingStyle style,
+  ) async {
+    try {
+      final quoteFuture = marketHub.getBestQuote(symbol, market: market);
+      final candlesFuture = marketHub.fetchCandles(
+        symbol,
+        interval,
+        market: market,
+        limit: 120,
+      );
+      final quote = await quoteFuture;
+      final candles = await candlesFuture;
+
+      if (quote == null ||
+          !quote.isValid ||
+          !quote.isFresh(maximumAge: const Duration(seconds: 15)) ||
+          quote.symbol.toUpperCase() != symbol.toUpperCase() ||
+          candles.length < 30) {
+        return null;
+      }
+
+      final latestCandle = candles.last;
+      final candleAge = DateTime.now().difference(latestCandle.time);
+      final maximumCandleAge = _intervalDuration(interval) * 3;
+      if (candleAge.isNegative || candleAge > maximumCandleAge) {
+        return null;
+      }
+
+      final previousTime = _lastCandleBySymbol[symbol];
+      final isNewCandle = previousTime != null &&
+          latestCandle.time.isAfter(previousTime);
+
+      if (previousTime == null || latestCandle.time.isAfter(previousTime)) {
+        _lastCandleBySymbol[symbol] = latestCandle.time;
+      }
+
+      final signal = signalEngine.analyze(candles, style: style);
+      return MarketScanResult(
+        symbol: symbol,
+        market: market,
+        quote: quote,
+        candles: candles,
+        signal: signal,
+        isNewCandle: isNewCandle,
+      );
+    } catch (_) {
+      return null;
+    }
+  }
+
+  Future<MarketScanCycle> scanNextBatch({
+    required String interval,
+    required TradingStyle style,
+    int batchSize = 4,
+  }) async {
+    final universe = <MapEntry<String, MarketType>>[
+      ...cryptoSymbols.map((s) => MapEntry(s, MarketType.crypto)),
+      ...forexSymbols.map((s) => MapEntry(s, MarketType.forex)),
+    ];
+
+    if (universe.isEmpty) {
+      return const MarketScanCycle(
+        batch: [],
+        bestOpportunity: null,
+        cycleCompleted: true,
+        scanned: 0,
+        total: 0,
+      );
+    }
+
+    final start = _cursor;
+    final end = (start + batchSize).clamp(0, universe.length);
+    final entries = universe.sublist(start, end);
+    final results = await Future.wait(entries.map((entry) {
+      return _scanOne(entry.key, entry.value, interval, style);
+    }));
+
+    final valid = results.whereType<MarketScanResult>().toList();
+    _validScannedInCycle += valid.length;
+
+    for (final result in valid) {
+      if (result.isNewCandle &&
+          result.signal.direction == SignalDirection.buy &&
+          result.signal.confidence >= 0.60) {
+        if (_bestInCycle == null ||
+            result.signal.confidence > _bestInCycle!.signal.confidence) {
+          _bestInCycle = result;
+        }
+      }
+    }
+
+    _cursor = end;
+    final completed = _cursor >= universe.length;
+    MarketScanResult? best;
+
+    if (completed) {
+      best = _bestInCycle;
+      _cursor = 0;
+      _bestInCycle = null;
+      _validScannedInCycle = 0;
+    }
+
+    return MarketScanCycle(
+      batch: valid,
+      bestOpportunity: best,
+      cycleCompleted: completed,
+      scanned: end,
+      total: universe.length,
+    );
+  }
+}
