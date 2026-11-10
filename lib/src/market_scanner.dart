@@ -27,6 +27,12 @@ class MarketScanCycle {
   final bool cycleCompleted;
   final int scanned;
   final int total;
+  final int quoteRejected;
+  final int candleRejected;
+  final int noNewCandle;
+  final int noBuySignal;
+  final int lowConfidence;
+  final int buySignals;
 
   const MarketScanCycle({
     required this.batch,
@@ -34,6 +40,12 @@ class MarketScanCycle {
     required this.cycleCompleted,
     required this.scanned,
     required this.total,
+    this.quoteRejected = 0,
+    this.candleRejected = 0,
+    this.noNewCandle = 0,
+    this.noBuySignal = 0,
+    this.lowConfidence = 0,
+    this.buySignals = 0,
   });
 }
 
@@ -212,7 +224,14 @@ class MarketScanner {
 
     return MarketScanCycle(
       batch: valid, bestOpportunity: best, cycleCompleted: completed,
-      scanned: end, total: universe.length,
+      scanned: end,
+      total: universe.length,
+      quoteRejected: _quoteRejected,
+      candleRejected: _candleRejected,
+      noNewCandle: _noNewCandle,
+      noBuySignal: _noBuySignal,
+      lowConfidence: _lowConfidence,
+      buySignals: _buySignals,
     );
   }
 }
