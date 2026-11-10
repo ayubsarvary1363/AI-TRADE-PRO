@@ -465,6 +465,12 @@ class TradingController extends ChangeNotifier {
       return;
     }
 
+    if (_cooldownUntil != null && DateTime.now().isBefore(_cooldownUntil!)) {
+      scannerStatus = 'پس از خروج زیان‌ده، دوره مکث فعال است';
+      return;
+    }
+
+    _lastPrices[candidate.symbol] = quote.midPrice;
     final currentEquity = portfolio.updateEquity(_currentPrices);
     final canTrade = riskManager.canTrade(
       currentEquity: currentEquity,
@@ -874,6 +880,8 @@ class TradingController extends ChangeNotifier {
     candles = [];
 
     _lastPrices.clear();
+    _scannerCandles.clear();
+    _scanner.reset();
 
     _quoteHealthy = false;
     _candlesHealthy = false;
