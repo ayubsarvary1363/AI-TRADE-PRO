@@ -123,7 +123,12 @@ class MarketHub {
     if (_disposed) return null;
 
     if (candidates.isEmpty) {
-      lastQuoteStatus = 'دریافت قیمت از تمام منابع ناموفق بود';
+      final details = providerErrors.entries
+          .map((entry) => '${entry.key}: ${entry.value}')
+          .join(' | ');
+      lastQuoteStatus = details.isEmpty
+          ? 'دریافت قیمت از تمام منابع ناموفق بود؛ جزئیات خطا ثبت نشد'
+          : 'دریافت قیمت ناموفق بود؛ $details';
       return null;
     }
 
@@ -280,7 +285,12 @@ class MarketHub {
     results.sort((a, b) => b.length.compareTo(a.length));
 
     if (results.isEmpty || results.first.isEmpty) {
-      lastCandleStatus = 'دریافت کندل از تمام منابع ناموفق بود';
+      final details = providerErrors.entries
+          .map((entry) => '${entry.key}: ${entry.value}')
+          .join(' | ');
+      lastCandleStatus = details.isEmpty
+          ? 'دریافت کندل از تمام منابع ناموفق بود؛ جزئیات خطا ثبت نشد'
+          : 'دریافت کندل ناموفق بود؛ $details';
       return const [];
     }
 

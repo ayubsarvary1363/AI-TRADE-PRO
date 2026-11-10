@@ -265,6 +265,25 @@ class _HomeScreenState extends State<HomeScreen> {
               _controller.status,
               style: Theme.of(context).textTheme.bodySmall,
             ),
+            const SizedBox(height: 6),
+            Text(
+              _controller.scannerStatus,
+              style: const TextStyle(
+                color: Colors.lightBlueAccent,
+                fontSize: 12,
+                fontWeight: FontWeight.w500,
+              ),
+            ),
+            if (_controller.activeStopPrice != null) ...[
+              const SizedBox(height: 6),
+              Text(
+                'حد ضرر فعال: ${_controller.activeStopPrice!.toStringAsFixed(6)}',
+                style: const TextStyle(
+                  color: Colors.orangeAccent,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            ],
             if (_controller.lastError != null) ...[
               const SizedBox(height: 6),
               Text(
@@ -443,27 +462,73 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   // -------------------- MARKETS --------------------
+  // Expanded selectable symbol catalog: 25 FX pairs and 30 crypto pairs.
 
   Widget _markets() {
-    final symbols = [
-      'BTCUSDT',
-      'ETHUSDT',
-      'BNBUSDT',
-      'SOLUSDT',
-      'XRPUSDT',
-      'ADAUSDT',
-      'DOGEUSDT',
-    ];
+    final isForex = _controller.selectedMarket == MarketType.forex;
+    final symbols = isForex
+        ? [
+            'EURUSD=X', 'GBPUSD=X', 'USDJPY=X', 'AUDUSD=X',
+            'USDCAD=X', 'USDCHF=X', 'NZDUSD=X',
+            'EURGBP=X', 'EURJPY=X', 'EURCHF=X', 'EURAUD=X',
+            'EURCAD=X', 'EURNZD=X',
+            'GBPJPY=X', 'GBPCHF=X', 'GBPAUD=X', 'GBPCAD=X',
+            'GBPNZD=X',
+            'AUDJPY=X', 'AUDNZD=X', 'AUDCAD=X', 'AUDCHF=X',
+            'NZDJPY=X', 'CADJPY=X', 'CHFJPY=X',
+          ]
+        : [
+            'BTCUSDT', 'ETHUSDT', 'BNBUSDT', 'SOLUSDT',
+            'XRPUSDT', 'ADAUSDT', 'DOGEUSDT', 'LTCUSDT',
+            'BCHUSDT', 'LINKUSDT', 'DOTUSDT', 'AVAXUSDT',
+            'XLMUSDT', 'ATOMUSDT', 'UNIUSDT', 'ETCUSDT',
+            'FILUSDT', 'AAVEUSDT', 'NEARUSDT', 'ALGOUSDT',
+            'TRXUSDT', 'SHIBUSDT', 'PEPEUSDT', 'SUIUSDT',
+            'TONUSDT', 'ICPUSDT', 'INJUSDT', 'OPUSDT',
+            'ARBUSDT', 'APTUSDT',
+          ];
 
     return ListView(
       padding: const EdgeInsets.all(16),
       children: [
-        _sectionTitle('انتخاب نماد رمزارز'),
+        Card(
+          color: Colors.blueGrey.withOpacity(0.18),
+          child: const Padding(
+            padding: EdgeInsets.all(12),
+            child: Text(
+              'انتخاب نماد در این صفحه فقط برای مشاهده قیمت و نمودار است. ربات به‌صورت خودکار تمام نمادهای پشتیبانی‌شده رمزارز و فارکس را اسکن می‌کند و بهترین فرصت را انتخاب می‌کند.',
+              style: TextStyle(fontSize: 12),
+            ),
+          ),
+        ),
+        const SizedBox(height: 10),
+        _sectionTitle('انتخاب بازار'),
+        Card(
+          child: Padding(
+            padding: const EdgeInsets.all(14),
+            child: DropdownButtonFormField<MarketType>(
+              value: _controller.selectedMarket,
+              decoration: const InputDecoration(
+                labelText: 'بازار معاملاتی',
+                border: OutlineInputBorder(),
+              ),
+              items: const [
+                DropdownMenuItem(value: MarketType.crypto, child: Text('رمزارز')),
+                DropdownMenuItem(value: MarketType.forex, child: Text('فارکس')),
+              ],
+              onChanged: (value) {
+                if (value != null) _controller.changeMarket(value);
+              },
+            ),
+          ),
+        ),
+        const SizedBox(height: 12),
+        _sectionTitle(isForex ? 'انتخاب جفت‌ارز فارکس' : 'انتخاب نماد رمزارز'),
         Card(
           child: Column(
             children: symbols.map((symbol) {
               return ListTile(
-                title: Text(symbol),
+                title: Text(symbol.replaceAll('=X', '')),
                 trailing: _controller.symbol == symbol
                     ? const Icon(
                         Icons.check_circle,
@@ -558,46 +623,134 @@ class _HomeScreenState extends State<HomeScreen> {
 
   Widget _tradeHistory({int? limit}) {
     final allFills = _controller.portfolio.fills.reversed.toList();
-
-    final fills = limit == null
-        ? allFills
-        : allFills.take(limit).toList();
+    final fills = limit == null ? allFills : allFills.take(limit).toList();
 
     if (fills.isEmpty) {
       return const Card(
         child: Padding(
           padding: EdgeInsets.all(18),
-          child: Center(
-            child: Text('هنوز معامله‌ای ثبت نشده است'),
-          ),
+          child: Center(child: Text('هنوز معامله‌ای ثبت نشده است')),
         ),
       );
     }
 
-    return Card(
-      child: Column(
-        children: fills.map((fill) {
-          final isBuy = fill.side == SignalDirection.buy;
+    return Column(
+      children: fills.map((fill) {
+        final isBuy = fill.side == SignalDirection.buy;
+        final position = _controller.portfolio.positions[fill.symbol];
+        final isOpen = isBuy && position != null;
+        final isCurrentSymbol = _controller.symbol == fill.symbol;
+        final digits = fill.symbol.contains('=X') ? 5 : 6;
+        final current = isCurrentSymbol && _controller.hasValidPrice
+            ? _controller.currentPrice
+            : null;
+        final openPnl = isOpen && current != null
+            ? (current - position.averageEntryPrice) * position.quantity
+            : null;
+        final pnl = isBuy ? openPnl : fill.realizedPnl;
+        final pnlColor = pnl == null
+            ? Colors.grey
+            : pnl >= 0 ? Colors.greenAccent : Colors.redAccent;
+        final notional = fill.price * fill.quantity;
+        final shownStopLoss = isOpen && isCurrentSymbol
+            ? (_controller.activeStopPrice ?? fill.stopLoss)
+            : fill.stopLoss;
 
-          return ListTile(
-            leading: Icon(
-              isBuy ? Icons.arrow_downward : Icons.arrow_upward,
-              color: isBuy ? Colors.greenAccent : Colors.redAccent,
-            ),
-            title: Text(
-              '${isBuy ? 'خرید' : 'فروش'} ${fill.symbol}',
-            ),
-            subtitle: Text(
-              '${fill.quantity.toStringAsFixed(6)} واحد • '
-              '${fill.time.toLocal()}',
-            ),
-            trailing: Text(
-              '${fill.price.toStringAsFixed(4)}',
-              style: const TextStyle(fontWeight: FontWeight.bold),
+        String priceText(double? value) => value == null
+            ? '—'
+            : value.toStringAsFixed(digits);
+
+        Widget detail(String label, String value, {Color? color}) {
+          return Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(label, style: const TextStyle(fontSize: 11, color: Colors.white70)),
+                const SizedBox(height: 4),
+                Text(
+                  value,
+                  style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: color),
+                ),
+              ],
             ),
           );
-        }).toList(),
-      ),
+        }
+
+        return Card(
+          margin: const EdgeInsets.only(bottom: 10),
+          child: Padding(
+            padding: const EdgeInsets.all(14),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    Icon(
+                      isBuy ? Icons.north_east : Icons.south_west,
+                      color: isBuy ? Colors.greenAccent : Colors.redAccent,
+                    ),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: Text(
+                        '${isBuy ? 'خرید' : 'فروش'} ${fill.symbol.replaceAll('=X', '')}',
+                        style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+                      ),
+                    ),
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 5),
+                      decoration: BoxDecoration(
+                        color: isOpen ? Colors.green.withOpacity(0.15) : Colors.white10,
+                        borderRadius: BorderRadius.circular(20),
+                      ),
+                      child: Text(
+                        isOpen ? 'باز' : 'بسته',
+                        style: TextStyle(
+                          fontSize: 11,
+                          color: isOpen ? Colors.greenAccent : Colors.white70,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 6),
+                Text(
+                  fill.time.toLocal().toString().substring(0, 16),
+                  style: const TextStyle(fontSize: 11, color: Colors.white60),
+                ),
+                const Divider(height: 20),
+                Row(
+                  children: [
+                    detail('نقطه ورود', isBuy ? priceText(fill.price) : '—'),
+                    detail('حد ضرر (SL)', isBuy ? priceText(shownStopLoss) : '—'),
+                    detail('TP / حد سود', isBuy ? priceText(fill.takeProfit) : '—'),
+                  ],
+                ),
+                const SizedBox(height: 14),
+                Row(
+                  children: [
+                    detail('تارگت پوینت', isBuy ? priceText(fill.targetPoints) : '—'),
+                    detail('حجم معامله', '${fill.quantity.toStringAsFixed(6)}'),
+                    detail('ارزش معامله', '${notional.toStringAsFixed(3)} USDT'),
+                  ],
+                ),
+                const Divider(height: 20),
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    const Text('سود و زیان', style: TextStyle(fontSize: 12)),
+                    Text(
+                      pnl == null
+                          ? (isOpen ? 'قیمت فعلی در دسترس نیست' : '—')
+                          : '${pnl >= 0 ? '+' : ''}${pnl.toStringAsFixed(4)} USDT',
+                      style: TextStyle(fontWeight: FontWeight.bold, color: pnlColor),
+                    ),
+                  ],
+                ),
+              ],
+            ),
+          ),
+        );
+      }).toList(),
     );
   }
 
@@ -619,15 +772,11 @@ class _HomeScreenState extends State<HomeScreen> {
   Widget _settings() {
     const intervals = [
       '1m',
-      '3m',
       '5m',
       '15m',
       '30m',
       '1h',
-      '2h',
-      '4h',
       '1d',
-      '1w',
     ];
 
     return ListView(

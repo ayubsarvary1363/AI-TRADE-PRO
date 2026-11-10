@@ -1,8 +1,8 @@
-
 import 'exchange_router.dart';
 import 'market_provider.dart';
 import 'kraken_provider.dart';
 import 'coinbase_provider.dart';
+import 'biquote_forex_provider.dart';
 
 class ProviderSetup {
   ProviderSetup._();
@@ -14,15 +14,18 @@ class ProviderSetup {
     registry.register(KrakenProvider());
     registry.register(CoinbaseProvider());
 
+    // قیمت فارکس فقط از تیک تازه MT5 دریافت می‌شود.
+    registry.register(BiQuoteForexProvider());
+
     return registry;
   }
 
   static List<MarketType> get supportedMarkets => [
         MarketType.crypto,
+        MarketType.forex,
       ];
 
   static List<MarketType> get plannedMarkets => [
-        MarketType.forex,
         MarketType.stocks,
         MarketType.commodities,
         MarketType.indices,
@@ -43,5 +46,6 @@ class ProviderSetup {
   static List<String> get activeProviderNames => [
         'Kraken',
         'Coinbase',
+        'BiQuote Forex (MT5)',
       ];
 }
