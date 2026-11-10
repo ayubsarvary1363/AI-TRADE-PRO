@@ -46,6 +46,15 @@ class TradingController extends ChangeNotifier {
   List<Candle> candles = [];
 
   DateTime? _lastProcessedCandle;
+  DateTime? _cooldownUntil;
+  double? _activeStopPrice;
+  double? _initialRiskDistance;
+  double? _highestPriceSinceEntry;
+  String? _lastExitReason;
+
+  static const Duration _stopCooldown = Duration(minutes: 10);
+  static const double _atrStopMultiplier = 2.0;
+  static const double _trailAtrMultiplier = 1.8;
 
   final Map<String, double> _lastPrices = {};
 
@@ -209,7 +218,7 @@ class TradingController extends ChangeNotifier {
       _quoteHealthy = true;
 
       portfolio.updateEquity(_currentPrices);
-
+      _manageOpenPosition();
       _updateErrorStatus();
 
       if (lastError == null && _running) {
@@ -324,6 +333,10 @@ class TradingController extends ChangeNotifier {
     }
 
     if (signal.direction == SignalDirection.buy) {
+      if (_cooldownUntil != null && DateTime.now().isBefore(_cooldownUntil!)) {
+        status = 'پس از خروج زیان‌ده، دوره مکث فعال است';
+        return;
+      }
       _executePaperBuy(signal);
     } else if (signal.direction == SignalDirection.sell) {
       _executePaperSell();
@@ -348,7 +361,16 @@ class TradingController extends ChangeNotifier {
       return;
     }
 
-    final stopPrice = price * 0.98;
+    final atr = _calculateAtr(candles, 14);
+    if (atr <= 0 || !atr.isFinite) {
+      status = 'ATR معتبر نیست؛ برای حفظ سرمایه ورود انجام نشد';
+      return;
+    }
+
+    final riskDistance = (atr * _atrStopMultiplier)
+        .clamp(price * 0.008, price * 0.04)
+        .toDouble();
+    final stopPrice = price - riskDistance;
 
     final quantity = riskManager.calculatePositionSize(
       equity: portfolio.equity(_currentPrices),
@@ -368,8 +390,15 @@ class TradingController extends ChangeNotifier {
       quantity: quantity,
     );
 
+    if (success) {
+      _activeStopPrice = stopPrice;
+      _initialRiskDistance = riskDistance;
+      _highestPriceSinceEntry = price;
+      _lastExitReason = null;
+    }
+
     status = success
-        ? 'خرید آزمایشی ثبت شد'
+        ? 'خرید آزمایشی ثبت شد؛ حد ضرر پویا فعال شد'
         : 'موجودی برای خرید کافی نیست';
   }
 
@@ -399,9 +428,84 @@ class TradingController extends ChangeNotifier {
       quantity: position.quantity,
     );
 
+    if (success) _clearProtectiveState();
+
     status = success
         ? 'فروش آزمایشی ثبت شد'
         : 'ثبت فروش ناموفق بود';
+  }
+
+  // -------------------- DYNAMIC RISK ENGINE --------------------
+
+  double _calculateAtr(List<Candle> data, int period) {
+    if (data.length < period + 1) return 0;
+    final sorted = [...data]..sort((a, b) => a.time.compareTo(b.time));
+    final start = sorted.length - period;
+    double total = 0;
+    for (int i = start; i < sorted.length; i++) {
+      final current = sorted[i];
+      final previousClose = sorted[i - 1].close;
+      final trueRange = [
+        current.high - current.low,
+        (current.high - previousClose).abs(),
+        (current.low - previousClose).abs(),
+      ].reduce((a, b) => a > b ? a : b);
+      total += trueRange;
+    }
+    return total / period;
+  }
+
+  void _manageOpenPosition() {
+    if (!_running || !hasValidPrice) return;
+    final position = portfolio.positions[symbol];
+    if (position == null || _activeStopPrice == null) return;
+
+    final bid = latestQuote!.bid;
+    if (bid <= 0 || !bid.isFinite) return;
+
+    final previousHigh = _highestPriceSinceEntry ?? position.averageEntryPrice;
+    if (bid > previousHigh) _highestPriceSinceEntry = bid;
+    final high = _highestPriceSinceEntry ?? bid;
+    final atr = _calculateAtr(candles, 14);
+    final initialRisk = _initialRiskDistance ??
+        (position.averageEntryPrice - _activeStopPrice!);
+
+    if (initialRisk > 0 &&
+        high >= position.averageEntryPrice + initialRisk * 1.25) {
+      final breakEven = position.averageEntryPrice * 1.002;
+      if (breakEven > _activeStopPrice!) _activeStopPrice = breakEven;
+    }
+
+    if (atr > 0 && initialRisk > 0 &&
+        high >= position.averageEntryPrice + initialRisk * 1.5) {
+      final trailDistance = (atr * _trailAtrMultiplier)
+          .clamp(position.averageEntryPrice * 0.006,
+              position.averageEntryPrice * 0.035)
+          .toDouble();
+      final trailingStop = high - trailDistance;
+      if (trailingStop > _activeStopPrice!) _activeStopPrice = trailingStop;
+    }
+
+    if (bid <= _activeStopPrice!) {
+      final success = portfolio.sell(
+        symbol: symbol,
+        price: bid,
+        quantity: position.quantity,
+      );
+      if (success) {
+        _lastExitReason = 'حد ضرر پویا فعال شد';
+        _cooldownUntil = DateTime.now().add(_stopCooldown);
+        _clearProtectiveState();
+        status = 'خروج حفاظتی انجام شد؛ ورود مجدد موقتاً متوقف است';
+        notifyListeners();
+      }
+    }
+  }
+
+  void _clearProtectiveState() {
+    _activeStopPrice = null;
+    _initialRiskDistance = null;
+    _highestPriceSinceEntry = null;
   }
 
   // -------------------- SETTINGS --------------------
@@ -489,6 +593,9 @@ class TradingController extends ChangeNotifier {
     _candlesHealthy = false;
 
     _lastProcessedCandle = null;
+    _cooldownUntil = null;
+    _clearProtectiveState();
+    _lastExitReason = null;
 
     lastError = null;
     status = 'حساب آزمایشی بازنشانی شد';
