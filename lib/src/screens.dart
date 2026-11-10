@@ -584,46 +584,131 @@ class _HomeScreenState extends State<HomeScreen> {
 
   Widget _tradeHistory({int? limit}) {
     final allFills = _controller.portfolio.fills.reversed.toList();
-
-    final fills = limit == null
-        ? allFills
-        : allFills.take(limit).toList();
+    final fills = limit == null ? allFills : allFills.take(limit).toList();
 
     if (fills.isEmpty) {
       return const Card(
         child: Padding(
           padding: EdgeInsets.all(18),
-          child: Center(
-            child: Text('هنوز معامله‌ای ثبت نشده است'),
-          ),
+          child: Center(child: Text('هنوز معامله‌ای ثبت نشده است')),
         ),
       );
     }
 
-    return Card(
-      child: Column(
-        children: fills.map((fill) {
-          final isBuy = fill.side == SignalDirection.buy;
+    return Column(
+      children: fills.map((fill) {
+        final isBuy = fill.side == SignalDirection.buy;
+        final position = _controller.portfolio.positions[fill.symbol];
+        final isOpen = isBuy && position != null;
+        final isCurrentSymbol = _controller.symbol == fill.symbol;
+        final digits = fill.symbol.contains('=X') ? 5 : 6;
+        final current = isCurrentSymbol && _controller.hasValidPrice
+            ? _controller.currentPrice
+            : null;
+        final openPnl = isOpen && current != null
+            ? (current - position.averageEntryPrice) * position.quantity
+            : null;
+        final pnl = isBuy ? openPnl : fill.realizedPnl;
+        final pnlColor = pnl == null
+            ? Colors.grey
+            : pnl >= 0 ? Colors.greenAccent : Colors.redAccent;
+        final notional = fill.price * fill.quantity;
 
-          return ListTile(
-            leading: Icon(
-              isBuy ? Icons.arrow_downward : Icons.arrow_upward,
-              color: isBuy ? Colors.greenAccent : Colors.redAccent,
-            ),
-            title: Text(
-              '${isBuy ? 'خرید' : 'فروش'} ${fill.symbol}',
-            ),
-            subtitle: Text(
-              '${fill.quantity.toStringAsFixed(6)} واحد • '
-              '${fill.time.toLocal()}',
-            ),
-            trailing: Text(
-              '${fill.price.toStringAsFixed(4)}',
-              style: const TextStyle(fontWeight: FontWeight.bold),
+        String priceText(double? value) => value == null
+            ? '—'
+            : value.toStringAsFixed(digits);
+
+        Widget detail(String label, String value, {Color? color}) {
+          return Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(label, style: const TextStyle(fontSize: 11, color: Colors.white70)),
+                const SizedBox(height: 4),
+                Text(
+                  value,
+                  style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: color),
+                ),
+              ],
             ),
           );
-        }).toList(),
-      ),
+        }
+
+        return Card(
+          margin: const EdgeInsets.only(bottom: 10),
+          child: Padding(
+            padding: const EdgeInsets.all(14),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    Icon(
+                      isBuy ? Icons.north_east : Icons.south_west,
+                      color: isBuy ? Colors.greenAccent : Colors.redAccent,
+                    ),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: Text(
+                        '${isBuy ? 'خرید' : 'فروش'} ${fill.symbol.replaceAll('=X', '')}',
+                        style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+                      ),
+                    ),
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 5),
+                      decoration: BoxDecoration(
+                        color: isOpen ? Colors.green.withOpacity(0.15) : Colors.white10,
+                        borderRadius: BorderRadius.circular(20),
+                      ),
+                      child: Text(
+                        isOpen ? 'باز' : 'بسته',
+                        style: TextStyle(
+                          fontSize: 11,
+                          color: isOpen ? Colors.greenAccent : Colors.white70,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 6),
+                Text(
+                  fill.time.toLocal().toString().substring(0, 16),
+                  style: const TextStyle(fontSize: 11, color: Colors.white60),
+                ),
+                const Divider(height: 20),
+                Row(
+                  children: [
+                    detail('نقطه ورود', isBuy ? priceText(fill.price) : '—'),
+                    detail('حد ضرر (SL)', isBuy ? priceText(fill.stopLoss) : '—'),
+                    detail('TP / حد سود', isBuy ? priceText(fill.takeProfit) : '—'),
+                  ],
+                ),
+                const SizedBox(height: 14),
+                Row(
+                  children: [
+                    detail('تارگت پوینت', isBuy ? priceText(fill.targetPoints) : '—'),
+                    detail('حجم معامله', '${fill.quantity.toStringAsFixed(6)}'),
+                    detail('ارزش معامله', '${notional.toStringAsFixed(3)} USDT'),
+                  ],
+                ),
+                const Divider(height: 20),
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    const Text('سود و زیان', style: TextStyle(fontSize: 12)),
+                    Text(
+                      pnl == null
+                          ? (isOpen ? 'قیمت فعلی در دسترس نیست' : '—')
+                          : '${pnl >= 0 ? '+' : ''}${pnl.toStringAsFixed(4)} USDT',
+                      style: TextStyle(fontWeight: FontWeight.bold, color: pnlColor),
+                    ),
+                  ],
+                ),
+              ],
+            ),
+          ),
+        );
+      }).toList(),
     );
   }
 
