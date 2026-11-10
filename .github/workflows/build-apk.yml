@@ -38,6 +38,18 @@ jobs:
           rm -rf android
           flutter create --platforms=android --org com.aitradepro --project-name ai_trade_pro .
 
+      - name: Ensure Android release internet permission
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          manifest = Path("android/app/src/main/AndroidManifest.xml")
+          content = manifest.read_text()
+          permission = '    <uses-permission android:name="android.permission.INTERNET" />'
+          if "android.permission.INTERNET" not in content:
+              content = content.replace("<application", permission + "\n    <application", 1)
+              manifest.write_text(content)
+          PY
+
       - name: Install dependencies
         run: flutter pub get
 
