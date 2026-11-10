@@ -40,6 +40,8 @@ class TradingController extends ChangeNotifier {
   bool _refreshingCandles = false;
   bool _disposed = false;
   bool _scanningMarkets = false;
+  bool _refreshingPositionQuote = false;
+  final Map<String, List<Candle>> _scannerCandles = {};
 
   late final MarketScanner _scanner;
   String scannerStatus = 'اسکن خودکار بازار هنوز شروع نشده است';
@@ -159,7 +161,10 @@ class TradingController extends ChangeNotifier {
 
     _quoteTimer = Timer.periodic(
       const Duration(seconds: 2),
-      (_) => refreshQuote(),
+      (_) {
+        refreshQuote();
+        refreshOpenPositionQuote();
+      },
     );
 
     _candleTimer = Timer.periodic(
@@ -267,6 +272,44 @@ class TradingController extends ChangeNotifier {
     }
   }
 
+  Future<void> refreshOpenPositionQuote() async {
+    if (_disposed || !_running || _refreshingPositionQuote ||
+        portfolio.positions.isEmpty) return;
+
+    final openSymbol = portfolio.positions.keys.first;
+    if (openSymbol == symbol) return;
+
+    _refreshingPositionQuote = true;
+    try {
+      final market = openSymbol.endsWith('=X')
+          ? MarketType.forex
+          : MarketType.crypto;
+      final quote = await marketHub.getBestQuote(
+        openSymbol,
+        market: market,
+      );
+      if (_disposed || !_running || quote == null ||
+          quote.symbol.toUpperCase() != openSymbol.toUpperCase() ||
+          !quote.isValid ||
+          !quote.isFresh(maximumAge: const Duration(seconds: 15))) {
+        return;
+      }
+
+      _lastPrices[openSymbol] = quote.midPrice;
+      _manageOpenPositionFor(
+        openSymbol,
+        quote,
+        _scannerCandles[openSymbol] ?? const <Candle>[],
+      );
+      portfolio.updateEquity(_currentPrices);
+    } catch (_) {
+      // A failed quote must never be treated as a valid exit price.
+    } finally {
+      _refreshingPositionQuote = false;
+      if (!_disposed) notifyListeners();
+    }
+  }
+
   // -------------------- REFRESH CANDLES --------------------
 
   Future<void> refreshCandles() async {
@@ -345,6 +388,7 @@ class TradingController extends ChangeNotifier {
 
       for (final result in cycle.batch) {
         _lastPrices[result.symbol] = result.quote.midPrice;
+        _scannerCandles[result.symbol] = result.candles;
 
         final position = portfolio.positions[result.symbol];
         if (position != null) {
