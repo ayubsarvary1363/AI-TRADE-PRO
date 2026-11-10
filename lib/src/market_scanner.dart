@@ -98,14 +98,24 @@ class MarketScanner {
 
       if (quote == null || !quote.isValid ||
           !quote.isFresh(maximumAge: const Duration(seconds: 15)) ||
-          quote.symbol.toUpperCase() != symbol.toUpperCase() ||
-          candles.length < 30) {
+          quote.symbol.toUpperCase() != symbol.toUpperCase()) {
         return null;
       }
 
-      final latestCandle = candles.last;
-      final candleAge = DateTime.now().difference(latestCandle.time);
-      final maximumCandleAge = _intervalDuration(interval) * 3;
+      // Kraken and Coinbase can include the still-forming candle.
+      // Only fully closed candles are eligible for a new trade signal.
+      final candleDuration = _intervalDuration(interval);
+      final now = DateTime.now();
+      final closedCandles = candles.where((candle) {
+        return candle.time.add(candleDuration).isBefore(now);
+      }).toList()
+        ..sort((a, b) => a.time.compareTo(b.time));
+
+      if (closedCandles.length < 30) return null;
+
+      final latestCandle = closedCandles.last;
+      final candleAge = now.difference(latestCandle.time);
+      final maximumCandleAge = candleDuration * 3;
       if (candleAge.isNegative || candleAge > maximumCandleAge) return null;
 
       final previousTime = _lastCandleBySymbol[symbol];
@@ -115,9 +125,9 @@ class MarketScanner {
         _lastCandleBySymbol[symbol] = latestCandle.time;
       }
 
-      final signal = signalEngine.analyze(candles, style: style);
+      final signal = signalEngine.analyze(closedCandles, style: style);
       return MarketScanResult(
-        symbol: symbol, market: market, quote: quote, candles: candles,
+        symbol: symbol, market: market, quote: quote, candles: closedCandles,
         signal: signal, isNewCandle: isNewCandle,
       );
     } catch (_) {
