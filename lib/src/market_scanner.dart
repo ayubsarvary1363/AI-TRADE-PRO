@@ -64,12 +64,25 @@ class MarketScanner {
   int _cursor = 0;
   MarketScanResult? _bestInCycle;
 
+  int _quoteRejected = 0;
+  int _candleRejected = 0;
+  int _noNewCandle = 0;
+  int _noBuySignal = 0;
+  int _lowConfidence = 0;
+  int _buySignals = 0;
+
   int get totalSymbols => cryptoSymbols.length + forexSymbols.length;
 
   void reset() {
     _lastCandleBySymbol.clear();
     _cursor = 0;
     _bestInCycle = null;
+    _quoteRejected = 0;
+    _candleRejected = 0;
+    _noNewCandle = 0;
+    _noBuySignal = 0;
+    _lowConfidence = 0;
+    _buySignals = 0;
   }
 
   Duration _intervalDuration(String interval) {
@@ -99,6 +112,7 @@ class MarketScanner {
       if (quote == null || !quote.isValid ||
           !quote.isFresh(maximumAge: const Duration(seconds: 15)) ||
           quote.symbol.toUpperCase() != symbol.toUpperCase()) {
+        _quoteRejected++;
         return null;
       }
 
@@ -111,12 +125,18 @@ class MarketScanner {
       }).toList()
         ..sort((a, b) => a.time.compareTo(b.time));
 
-      if (closedCandles.length < 30) return null;
+      if (closedCandles.length < 30) {
+        _candleRejected++;
+        return null;
+      }
 
       final latestCandle = closedCandles.last;
       final candleAge = now.difference(latestCandle.time);
       final maximumCandleAge = candleDuration * 3;
-      if (candleAge.isNegative || candleAge > maximumCandleAge) return null;
+      if (candleAge.isNegative || candleAge > maximumCandleAge) {
+        _candleRejected++;
+        return null;
+      }
 
       final previousTime = _lastCandleBySymbol[symbol];
       final isNewCandle = previousTime != null &&
@@ -125,12 +145,23 @@ class MarketScanner {
         _lastCandleBySymbol[symbol] = latestCandle.time;
       }
 
+      if (!isNewCandle) _noNewCandle++;
       final signal = signalEngine.analyze(closedCandles, style: style);
+      if (isNewCandle) {
+        if (signal.direction != SignalDirection.buy) {
+          _noBuySignal++;
+        } else if (signal.confidence < 0.60) {
+          _lowConfidence++;
+        } else {
+          _buySignals++;
+        }
+      }
       return MarketScanResult(
         symbol: symbol, market: market, quote: quote, candles: closedCandles,
         signal: signal, isNewCandle: isNewCandle,
       );
     } catch (_) {
+      _candleRejected++;
       return null;
     }
   }
