@@ -123,20 +123,73 @@ class SignalEngine {
 
   double _adx(List<Candle> data, int period) {
     if (data.length < period * 2 + 1) return 0;
-    double trSum = 0, plusSum = 0, minusSum = 0;
-    for (int i = data.length - period; i < data.length; i++) {
-      final c = data[i], p = data[i - 1];
-      final up = c.high - p.high, down = p.low - c.low;
-      plusSum += up > down && up > 0 ? up : 0;
-      minusSum += down > up && down > 0 ? down : 0;
-      trSum += [c.high - c.low, (c.high - p.close).abs(),
-        (c.low - p.close).abs()].reduce((a, b) => a > b ? a : b);
+    double dxTotal = 0;
+    int samples = 0;
+    for (int end = data.length - period; end < data.length; end++) {
+      final start = end - period + 1;
+      double trSum = 0, plusSum = 0, minusSum = 0;
+      for (int i = start; i <= end; i++) {
+        final current = data[i], previous = data[i - 1];
+        final up = current.high - previous.high;
+        final down = previous.low - current.low;
+        plusSum += up > down && up > 0 ? up : 0;
+        minusSum += down > up && down > 0 ? down : 0;
+        trSum += [current.high - current.low,
+          (current.high - previous.close).abs(),
+          (current.low - previous.close).abs()]
+          .reduce((x, y) => x > y ? x : y);
+      }
+      if (trSum <= 0) continue;
+      final plusDi = 100 * plusSum / trSum;
+      final minusDi = 100 * minusSum / trSum;
+      final total = plusDi + minusDi;
+      if (total > 0) {
+        dxTotal += 100 * (plusDi - minusDi).abs() / total;
+        samples++;
+      }
     }
-    if (trSum <= 0) return 0;
-    final plusDi = 100 * plusSum / trSum;
-    final minusDi = 100 * minusSum / trSum;
-    final total = plusDi + minusDi;
-    return total <= 0 ? 0 : 100 * (plusDi - minusDi).abs() / total;
+    return samples == 0 ? 0 : dxTotal / samples;
+  }
+
+  double _superTrendDirection(List<Candle> data, {
+    int period = 10, double multiplier = 3,
+  }) {
+    if (data.length < period + 2) return 0;
+    double finalUpper = 0, finalLower = 0;
+    int direction = 1;
+    for (int i = period; i < data.length; i++) {
+      final current = data[i], previous = data[i - 1];
+      double trSum = 0;
+      for (int j = i - period + 1; j <= i; j++) {
+        final candle = data[j], priorClose = data[j - 1].close;
+        trSum += [candle.high - candle.low,
+          (candle.high - priorClose).abs(),
+          (candle.low - priorClose).abs()]
+          .reduce((x, y) => x > y ? x : y);
+      }
+      final atrValue = trSum / period;
+      final hl2 = (current.high + current.low) / 2;
+      final basicUpper = hl2 + multiplier * atrValue;
+      final basicLower = hl2 - multiplier * atrValue;
+      if (i == period) {
+        finalUpper = basicUpper;
+        finalLower = basicLower;
+        direction = current.close >= hl2 ? 1 : -1;
+        continue;
+      }
+      final priorUpper = finalUpper;
+      final priorLower = finalLower;
+      finalUpper = basicUpper < priorUpper || previous.close > priorUpper
+          ? basicUpper : priorUpper;
+      finalLower = basicLower > priorLower || previous.close < priorLower
+          ? basicLower : priorLower;
+      if (direction < 0 && current.close > finalUpper) {
+        direction = 1;
+      } else if (direction > 0 && current.close < finalLower) {
+        direction = -1;
+      }
+    }
+    return direction.toDouble();
   }
 
   double _aroonOscillator(List<Candle> data, int period) {
@@ -147,7 +200,7 @@ class SignalEngine {
       if (sample[i].high >= sample[hi].high) hi = i;
       if (sample[i].low <= sample[lo].low) lo = i;
     }
-    return 100 * (hi - lo) / period;
+    return 100 * (hi - lo) / (period - 1);
   }
 
   double _accumulationDistribution(List<Candle> data, int period) {
@@ -223,9 +276,7 @@ class SignalEngine {
     }
     final tenkan = midpoint(9), kijun = midpoint(26);
     final spanA = (tenkan + kijun) / 2, spanB = midpoint(52);
-    final hl2 = (last.high + last.low) / 2;
-    final superTrendBull = last.close >= hl2 - 3 * atr &&
-      previous.close >= previous.low;
+    final superTrendDirection = _superTrendDirection(valid);
 
     int score = 0;
     final reasons = <String>[];
@@ -294,9 +345,9 @@ class SignalEngine {
     } else {
       reasons.add('VWAP به دلیل نبود حجم معتبر قابل اتکا نیست');
     }
-    if (superTrendBull && last.close > hl2) {
+    if (superTrendDirection > 0) {
       vote(1, 'SuperTrend جهت صعودی را تأیید می‌کند');
-    } else if (!superTrendBull && last.close < hl2) {
+    } else if (superTrendDirection < 0) {
       vote(-1, 'SuperTrend جهت نزولی را تأیید می‌کند');
     }
     if (last.close > spanA && last.close > spanB && tenkan > kijun) {
