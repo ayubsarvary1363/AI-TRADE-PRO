@@ -305,6 +305,9 @@ class PaperFill {
   final double quantity;
   final double fee;
   final double realizedPnl;
+  final double? stopLoss;
+  final double? takeProfit;
+  final double? targetPoints;
   final DateTime time;
 
   const PaperFill({
@@ -315,6 +318,9 @@ class PaperFill {
     required this.quantity,
     required this.fee,
     required this.realizedPnl,
+    this.stopLoss,
+    this.takeProfit,
+    this.targetPoints,
     required this.time,
   });
 }
@@ -396,6 +402,9 @@ class PaperPortfolio {
     required String symbol,
     required double price,
     required double quantity,
+    double? stopLoss,
+    double? takeProfit,
+    double? targetPoints,
   }) {
     if (symbol.isEmpty ||
         price <= 0 ||
@@ -437,6 +446,9 @@ class PaperPortfolio {
       quantity: quantity,
       fee: fee,
       realizedPnl: 0,
+      stopLoss: stopLoss,
+      takeProfit: takeProfit,
+      targetPoints: targetPoints,
       time: DateTime.now(),
     ));
 
