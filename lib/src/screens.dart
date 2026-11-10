@@ -491,6 +491,17 @@ class _HomeScreenState extends State<HomeScreen> {
     return ListView(
       padding: const EdgeInsets.all(16),
       children: [
+        Card(
+          color: Colors.blueGrey.withOpacity(0.18),
+          child: const Padding(
+            padding: EdgeInsets.all(12),
+            child: Text(
+              'انتخاب نماد در این صفحه فقط برای مشاهده قیمت و نمودار است. ربات به‌صورت خودکار تمام نمادهای پشتیبانی‌شده رمزارز و فارکس را اسکن می‌کند و بهترین فرصت را انتخاب می‌کند.',
+              style: TextStyle(fontSize: 12),
+            ),
+          ),
+        ),
+        const SizedBox(height: 10),
         _sectionTitle('انتخاب بازار'),
         Card(
           child: Padding(
