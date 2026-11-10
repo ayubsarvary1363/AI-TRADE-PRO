@@ -265,6 +265,15 @@ class _HomeScreenState extends State<HomeScreen> {
               _controller.status,
               style: Theme.of(context).textTheme.bodySmall,
             ),
+            const SizedBox(height: 6),
+            Text(
+              _controller.scannerStatus,
+              style: const TextStyle(
+                color: Colors.lightBlueAccent,
+                fontSize: 12,
+                fontWeight: FontWeight.w500,
+              ),
+            ),
             if (_controller.activeStopPrice != null) ...[
               const SizedBox(height: 6),
               Text(
