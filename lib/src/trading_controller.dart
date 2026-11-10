@@ -663,8 +663,6 @@ class TradingController extends ChangeNotifier {
     _quoteHealthy = false;
     _candlesHealthy = false;
 
-    _lastProcessedCandle = null;
-
     status = 'در حال دریافت اطلاعات $symbol';
 
     _updateErrorStatus();
@@ -687,7 +685,6 @@ class TradingController extends ChangeNotifier {
     candles = [];
 
     _candlesHealthy = false;
-    _lastProcessedCandle = null;
 
     status = 'در حال دریافت کندل‌های $interval';
 
@@ -734,7 +731,6 @@ class TradingController extends ChangeNotifier {
     _quoteHealthy = false;
     _candlesHealthy = false;
 
-    _lastProcessedCandle = null;
     _cooldownUntil = null;
     _clearProtectiveState();
 
