@@ -6,6 +6,7 @@ on:
   push:
     branches:
       - main
+      - feature/smart-risk-engine-v2
 
 permissions:
   contents: read
