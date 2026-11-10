@@ -54,7 +54,6 @@ class TradingController extends ChangeNotifier {
 
   List<Candle> candles = [];
 
-  DateTime? _lastProcessedCandle;
   // Never trade immediately from historical candles after start or selection.
   bool _awaitNextClosedCandle = true;
   DateTime? _cooldownUntil;
@@ -351,7 +350,6 @@ class TradingController extends ChangeNotifier {
       // The first dataset after start/symbol/timeframe changes is historical.
       // Record its latest closed candle but do not execute its old signal.
       if (_awaitNextClosedCandle) {
-        _lastProcessedCandle = candles.last.time;
         _awaitNextClosedCandle = false;
         if (_running) status = 'اطلاعات دریافت شد؛ برای جلوگیری از معامله فوری منتظر کندل بسته‌شده جدید هستیم';
         return;
@@ -531,155 +529,6 @@ class TradingController extends ChangeNotifier {
     }
   }
 
-  // -------------------- PAPER EXECUTION --------------------
-
-  void _processNewSignal() {
-    if (!_running ||
-        latestSignal == null ||
-        candles.isEmpty ||
-        !hasValidPrice ||
-        !hasValidCandles) {
-      return;
-    }
-
-    final signal = latestSignal!;
-    final candleTime = candles.last.time;
-
-    if (_lastProcessedCandle == candleTime) return;
-
-    _lastProcessedCandle = candleTime;
-
-    if (signal.direction == SignalDirection.hold ||
-        signal.confidence < 0.60 ||
-        currentPrice <= 0) {
-      status = 'سیگنال معتبر برای معامله وجود ندارد';
-      return;
-    }
-
-    final currentEquity = portfolio.updateEquity(
-      _currentPrices,
-    );
-
-    final canTrade = riskManager.canTrade(
-      currentEquity: currentEquity,
-      dayStartingEquity: portfolio.dayStartingEquity,
-      peakEquity: portfolio.peakEquity,
-    );
-
-    if (!canTrade) {
-      stop();
-      status = 'توقف خودکار به دلیل محدودیت ریسک';
-      return;
-    }
-
-    if (signal.direction == SignalDirection.buy) {
-      if (_cooldownUntil != null && DateTime.now().isBefore(_cooldownUntil!)) {
-        status = 'پس از خروج زیان‌ده، دوره مکث فعال است';
-        return;
-      }
-      _executePaperBuy(signal);
-    } else if (signal.direction == SignalDirection.sell) {
-      _executePaperSell();
-    }
-  }
-
-  void _executePaperBuy(TradeSignal signal) {
-    if (!hasValidPrice) {
-      status = 'قیمت معتبر برای خرید وجود ندارد';
-      return;
-    }
-
-    if (portfolio.positions.containsKey(symbol)) {
-      status = 'برای این نماد موقعیت خرید باز وجود دارد';
-      return;
-    }
-
-    final price = latestQuote!.ask;
-
-    if (price <= 0) {
-      status = 'قیمت خرید معتبر نیست';
-      return;
-    }
-
-    final atr = _calculateAtr(candles, 14);
-    if (atr <= 0 || !atr.isFinite) {
-      status = 'ATR معتبر نیست؛ برای حفظ سرمایه ورود انجام نشد';
-      return;
-    }
-
-    final riskDistance = (atr * _atrStopMultiplier)
-        .clamp(price * 0.008, price * 0.04)
-        .toDouble();
-    final stopPrice = price - riskDistance;
-    final takeProfitPrice = price + (riskDistance * 2.0);
-    final targetPoints = takeProfitPrice - price;
-
-    final quantity = riskManager.calculatePositionSize(
-      equity: portfolio.equity(_currentPrices),
-      entryPrice: price,
-      stopPrice: stopPrice,
-      confidence: signal.confidence,
-    );
-
-    if (quantity <= 0) {
-      status = 'حجم معامله با محدودیت ریسک سازگار نیست';
-      return;
-    }
-
-    final success = portfolio.buy(
-      symbol: symbol,
-      price: price,
-      quantity: quantity,
-      stopLoss: stopPrice,
-      takeProfit: takeProfitPrice,
-      targetPoints: targetPoints,
-    );
-
-    if (success) {
-      _activeStopPrice = stopPrice;
-      _activeTakeProfitPrice = takeProfitPrice;
-      _initialRiskDistance = riskDistance;
-      _highestPriceSinceEntry = price;
-    }
-
-    status = success
-        ? 'خرید آزمایشی ثبت شد؛ حد ضرر پویا فعال شد'
-        : 'موجودی برای خرید کافی نیست';
-  }
-
-  void _executePaperSell() {
-    if (!hasValidPrice) {
-      status = 'قیمت معتبر برای فروش وجود ندارد';
-      return;
-    }
-
-    final position = portfolio.positions[symbol];
-
-    if (position == null) {
-      status = 'موقعیت بازی برای فروش وجود ندارد';
-      return;
-    }
-
-    final price = latestQuote!.bid;
-
-    if (price <= 0) {
-      status = 'قیمت فروش معتبر نیست';
-      return;
-    }
-
-    final success = portfolio.sell(
-      symbol: symbol,
-      price: price,
-      quantity: position.quantity,
-    );
-
-    if (success) _clearProtectiveState();
-
-    status = success
-        ? 'فروش آزمایشی ثبت شد'
-        : 'ثبت فروش ناموفق بود';
-  }
-
   // -------------------- DYNAMIC RISK ENGINE --------------------
 
   double _calculateAtr(List<Candle> data, int period) {
@@ -790,7 +639,6 @@ class TradingController extends ChangeNotifier {
     candles = [];
     _quoteHealthy = false;
     _candlesHealthy = false;
-    _lastProcessedCandle = null;
     status = 'در حال دریافت اطلاعات بازار ${value == MarketType.forex ? 'فارکس' : 'رمزارز'}';
     _updateErrorStatus();
     notifyListeners();
