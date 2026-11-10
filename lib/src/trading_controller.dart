@@ -79,6 +79,8 @@ class TradingController extends ChangeNotifier {
 
   bool get hasValidCandles => candles.length >= 30;
 
+  double? get activeStopPrice => _activeStopPrice;
+
   double get currentPrice {
     if (!hasValidPrice) return 0;
     return latestQuote!.midPrice;
