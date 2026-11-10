@@ -453,6 +453,7 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   // -------------------- MARKETS --------------------
+  // Expanded selectable symbol catalog: 25 FX pairs and 30 crypto pairs.
 
   Widget _markets() {
     final isForex = _controller.selectedMarket == MarketType.forex;
