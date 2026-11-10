@@ -455,25 +455,41 @@ class _HomeScreenState extends State<HomeScreen> {
   // -------------------- MARKETS --------------------
 
   Widget _markets() {
-    final symbols = [
-      'BTCUSDT',
-      'ETHUSDT',
-      'BNBUSDT',
-      'SOLUSDT',
-      'XRPUSDT',
-      'ADAUSDT',
-      'DOGEUSDT',
-    ];
+    final isForex = _controller.selectedMarket == MarketType.forex;
+    final symbols = isForex
+        ? ['EURUSD=X', 'GBPUSD=X', 'USDJPY=X', 'AUDUSD=X', 'USDCAD=X', 'USDCHF=X']
+        : ['BTCUSDT', 'ETHUSDT', 'BNBUSDT', 'SOLUSDT', 'XRPUSDT', 'ADAUSDT', 'DOGEUSDT'];
 
     return ListView(
       padding: const EdgeInsets.all(16),
       children: [
-        _sectionTitle('انتخاب نماد رمزارز'),
+        _sectionTitle('انتخاب بازار'),
+        Card(
+          child: Padding(
+            padding: const EdgeInsets.all(14),
+            child: DropdownButtonFormField<MarketType>(
+              value: _controller.selectedMarket,
+              decoration: const InputDecoration(
+                labelText: 'بازار معاملاتی',
+                border: OutlineInputBorder(),
+              ),
+              items: const [
+                DropdownMenuItem(value: MarketType.crypto, child: Text('رمزارز')),
+                DropdownMenuItem(value: MarketType.forex, child: Text('فارکس')),
+              ],
+              onChanged: (value) {
+                if (value != null) _controller.changeMarket(value);
+              },
+            ),
+          ),
+        ),
+        const SizedBox(height: 12),
+        _sectionTitle(isForex ? 'انتخاب جفت‌ارز فارکس' : 'انتخاب نماد رمزارز'),
         Card(
           child: Column(
             children: symbols.map((symbol) {
               return ListTile(
-                title: Text(symbol),
+                title: Text(symbol.replaceAll('=X', '')),
                 trailing: _controller.symbol == symbol
                     ? const Icon(
                         Icons.check_circle,
