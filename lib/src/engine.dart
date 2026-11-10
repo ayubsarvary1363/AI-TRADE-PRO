@@ -72,147 +72,265 @@ class TradeSignal {
 // -------------------- INDICATORS --------------------
 
 class SignalEngine {
+  double _sma(List<double> values, int period) {
+    if (values.length < period) return 0;
+    final slice = values.sublist(values.length - period);
+    return slice.reduce((a, b) => a + b) / period;
+  }
+
   double _ema(List<double> values, int period) {
     if (values.length < period) return 0;
-
     final multiplier = 2 / (period + 1);
-    double result = values.take(period).reduce((a, b) => a + b) / period;
-
+    double result = _sma(values.take(period).toList(), period);
     for (final value in values.skip(period)) {
-      result = (value - result) * multiplier + result;
+      result += (value - result) * multiplier;
     }
-
     return result;
   }
 
   double _rsi(List<double> values, int period) {
     if (values.length <= period) return 50;
-
-    double gains = 0;
-    double losses = 0;
-
+    double gains = 0, losses = 0;
     for (int i = values.length - period; i < values.length; i++) {
       final change = values[i] - values[i - 1];
-
-      if (change > 0) {
-        gains += change;
-      } else {
-        losses += change.abs();
-      }
+      if (change > 0) { gains += change; } else { losses += change.abs(); }
     }
-
-    if (losses == 0) return 100;
-
-    final averageGain = gains / period;
-    final averageLoss = losses / period;
-    final rs = averageGain / averageLoss;
-
+    if (losses == 0) return gains == 0 ? 50 : 100;
+    if (gains == 0) return 0;
+    final rs = (gains / period) / (losses / period);
     return 100 - (100 / (1 + rs));
   }
 
-  TradeSignal analyze(
-    List<Candle> candles, {
+  double _stdDev(List<double> values, int period) {
+    if (values.length < period) return 0;
+    final sample = values.sublist(values.length - period);
+    final mean = sample.reduce((a, b) => a + b) / period;
+    final variance = sample.fold<double>(0,
+      (sum, value) => sum + (value - mean) * (value - mean)) / period;
+    return sqrt(variance);
+  }
+
+  double _atr(List<Candle> data, int period) {
+    if (data.length < period + 1) return 0;
+    double total = 0;
+    for (int i = data.length - period; i < data.length; i++) {
+      final c = data[i], previousClose = data[i - 1].close;
+      total += [c.high - c.low, (c.high - previousClose).abs(),
+        (c.low - previousClose).abs()].reduce(max);
+    }
+    return total / period;
+  }
+
+  double _adx(List<Candle> data, int period) {
+    if (data.length < period * 2 + 1) return 0;
+    double trSum = 0, plusSum = 0, minusSum = 0;
+    for (int i = data.length - period; i < data.length; i++) {
+      final c = data[i], p = data[i - 1];
+      final up = c.high - p.high, down = p.low - c.low;
+      plusSum += up > down && up > 0 ? up : 0;
+      minusSum += down > up && down > 0 ? down : 0;
+      trSum += [c.high - c.low, (c.high - p.close).abs(),
+        (c.low - p.close).abs()].reduce(max);
+    }
+    if (trSum <= 0) return 0;
+    final plusDi = 100 * plusSum / trSum;
+    final minusDi = 100 * minusSum / trSum;
+    final total = plusDi + minusDi;
+    return total <= 0 ? 0 : 100 * (plusDi - minusDi).abs() / total;
+  }
+
+  double _aroonOscillator(List<Candle> data, int period) {
+    if (data.length < period) return 0;
+    final sample = data.sublist(data.length - period);
+    int hi = 0, lo = 0;
+    for (int i = 1; i < sample.length; i++) {
+      if (sample[i].high >= sample[hi].high) hi = i;
+      if (sample[i].low <= sample[lo].low) lo = i;
+    }
+    return 100 * (hi - lo) / period;
+  }
+
+  double _accumulationDistribution(List<Candle> data, int period) {
+    if (data.length < period) return 0;
+    double ad = 0;
+    for (final c in data.skip(data.length - period)) {
+      final range = c.high - c.low;
+      if (range <= 0 || c.volume <= 0) continue;
+      ad += (((c.close - c.low) - (c.high - c.close)) / range) * c.volume;
+    }
+    return ad;
+  }
+
+  double _vwap(List<Candle> data, int period) {
+    if (data.length < period) return 0;
+    double pv = 0, volume = 0;
+    for (final c in data.skip(data.length - period)) {
+      if (c.volume <= 0) continue;
+      pv += ((c.high + c.low + c.close) / 3) * c.volume;
+      volume += c.volume;
+    }
+    return volume > 0 ? pv / volume : 0;
+  }
+
+  double _stochasticRsi(List<double> values, int rsiPeriod, int stochPeriod) {
+    if (values.length < rsiPeriod + stochPeriod + 1) return 50;
+    final rsiValues = <double>[];
+    for (int i = values.length - stochPeriod - rsiPeriod;
+        i < values.length; i++) {
+      rsiValues.add(_rsi(values.sublist(0, i + 1), rsiPeriod));
+    }
+    final window = rsiValues.sublist(rsiValues.length - stochPeriod);
+    final low = window.reduce(min), high = window.reduce(max);
+    if ((high - low).abs() < 1e-12) return 50;
+    return 100 * (window.last - low) / (high - low);
+  }
+
+  TradeSignal analyze(List<Candle> candles, {
     TradingStyle style = TradingStyle.mediumTerm,
   }) {
     final valid = candles.where((c) => c.isValid).toList()
       ..sort((a, b) => a.time.compareTo(b.time));
-
-    if (valid.length < 30) {
+    if (valid.length < 60) {
       return TradeSignal(
-        direction: SignalDirection.hold,
-        confidence: 0,
+        direction: SignalDirection.hold, confidence: 0,
         price: valid.isEmpty ? 0 : valid.last.close,
-        reasons: ['داده کافی برای تحلیل وجود ندارد'],
+        reasons: ['برای تحلیل چنداندیکاتوری حداقل ۶۰ کندل معتبر لازم است'],
         createdAt: DateTime.now(),
       );
     }
 
-    final prices = valid.map((c) => c.close).toList();
+    final closes = valid.map((c) => c.close).toList();
+    final last = valid.last, previous = valid[valid.length - 2];
+    final sma20 = _sma(closes, 20), sma50 = _sma(closes, 50);
+    final ema9 = _ema(closes, 9), ema21 = _ema(closes, 21);
+    final macd = _ema(closes, 12) - _ema(closes, 26);
+    final oldCloses = closes.sublist(0, closes.length - 1);
+    final oldMacd = _ema(oldCloses, 12) - _ema(oldCloses, 26);
+    final rsi = _rsi(closes, 14), adx = _adx(valid, 14);
+    final aroon = _aroonOscillator(valid, 25);
+    final ad = _accumulationDistribution(valid, 20);
+    final oldAd = _accumulationDistribution(valid.sublist(0, valid.length - 1), 20);
+    final deviation = _stdDev(closes, 20);
+    final zScore = deviation > 0 ? (last.close - sma20) / deviation : 0.0;
+    final upper = sma20 + 2 * deviation, lower = sma20 - 2 * deviation;
+    final atr = _atr(valid, 14), vwap = _vwap(valid, 20);
+    final stochRsi = _stochasticRsi(closes, 14, 14);
 
-    final ema9 = _ema(prices, 9);
-    final ema21 = _ema(prices, 21);
-    final ema26 = _ema(prices, 26);
-    final ema12 = _ema(prices, 12);
-    final rsi = _rsi(prices, 14);
-
-    final macd = ema12 - ema26;
-    final previousMacd = _ema(prices.sublist(0, prices.length - 1), 12) -
-        _ema(prices.sublist(0, prices.length - 1), 26);
-
-    final last = valid.last;
-    final previous = valid[valid.length - 2];
+    double midpoint(int period) {
+      final sample = valid.sublist(valid.length - period);
+      return (sample.map((c) => c.high).reduce(max) +
+        sample.map((c) => c.low).reduce(min)) / 2;
+    }
+    final tenkan = midpoint(9), kijun = midpoint(26);
+    final spanA = (tenkan + kijun) / 2, spanB = midpoint(52);
+    final hl2 = (last.high + last.low) / 2;
+    final superTrendBull = last.close >= hl2 - 3 * atr &&
+      previous.close >= previous.low;
 
     int score = 0;
     final reasons = <String>[];
+    void vote(int value, String reason) {
+      score += value;
+      reasons.add(reason);
+    }
 
+    if (last.close > sma20 && sma20 > sma50) {
+      vote(2, 'SMA20 بالاتر از SMA50 و قیمت بالای هر دو است');
+    } else if (last.close < sma20 && sma20 < sma50) {
+      vote(-2, 'SMA20 پایین‌تر از SMA50 و قیمت زیر هر دو است');
+    }
     if (ema9 > ema21) {
-      score++;
-      reasons.add('روند کوتاه‌مدت صعودی است');
+      vote(1, 'EMA9 بالاتر از EMA21 است');
     } else if (ema9 < ema21) {
-      score--;
-      reasons.add('روند کوتاه‌مدت نزولی است');
+      vote(-1, 'EMA9 پایین‌تر از EMA21 است');
     }
-
-    if (last.close > ema21) {
-      score++;
-      reasons.add('قیمت بالاتر از میانگین ۲۱ دوره است');
+    if (macd > oldMacd && macd > 0) {
+      vote(1, 'MACD مثبت و رو به تقویت است');
+    } else if (macd < oldMacd && macd < 0) {
+      vote(-1, 'MACD منفی و رو به تضعیف است');
+    }
+    if (rsi >= 52 && rsi < 70) {
+      vote(1, 'RSI مومنتوم صعودی دارد');
+    } else if (rsi <= 48 && rsi > 30) {
+      vote(-1, 'RSI مومنتوم نزولی دارد');
+    } else if (rsi >= 70 || rsi <= 30) {
+      reasons.add('RSI در محدوده اشباع است؛ ورود با احتیاط');
+    }
+    if (adx >= 20) {
+      if (last.close > sma20) {
+        vote(1, 'ADX قدرت روند صعودی را تأیید می‌کند');
+      } else if (last.close < sma20) {
+        vote(-1, 'ADX قدرت روند نزولی را تأیید می‌کند');
+      }
     } else {
-      score--;
-      reasons.add('قیمت پایین‌تر از میانگین ۲۱ دوره است');
+      reasons.add('ADX روند قدرتمندی نشان نمی‌دهد');
     }
-
-    if (macd > previousMacd) {
-      score++;
-      reasons.add('مومنتوم MACD در حال تقویت است');
+    if (aroon > 25) {
+      vote(1, 'Aroon برتری روند صعودی را نشان می‌دهد');
+    } else if (aroon < -25) {
+      vote(-1, 'Aroon برتری روند نزولی را نشان می‌دهد');
+    }
+    if (ad > oldAd && ad > 0) {
+      vote(1, 'خط A/D افزایش فشار انباشت را نشان می‌دهد');
+    } else if (ad < oldAd && ad < 0) {
+      vote(-1, 'خط A/D افزایش فشار توزیع را نشان می‌دهد');
     } else {
-      score--;
-      reasons.add('مومنتوم MACD در حال تضعیف است');
+      reasons.add('A/D: حجم معتبر یا جهت روشنی وجود ندارد');
     }
-
-    if (rsi >= 50 && rsi < 70) {
-      score++;
-      reasons.add('RSI وضعیت صعودی متعادل دارد');
-    } else if (rsi < 50 && rsi > 30) {
-      score--;
-      reasons.add('RSI وضعیت نزولی دارد');
-    } else if (rsi >= 70) {
-      reasons.add('RSI در محدوده اشباع خرید است');
+    if (zScore < -1.5 && last.close < lower) {
+      vote(1, 'Mean Reversion احتمال بازگشت از محدوده پایین را نشان می‌دهد');
+    } else if (zScore > 1.5 && last.close > upper) {
+      vote(-1, 'Mean Reversion احتمال بازگشت از محدوده بالا را نشان می‌دهد');
+    }
+    if (last.close <= lower) {
+      vote(1, 'قیمت به باند پایینی بولینگر رسیده است');
+    } else if (last.close >= upper) {
+      vote(-1, 'قیمت به باند بالایی بولینگر رسیده است');
+    }
+    if (vwap > 0 && last.close > vwap) {
+      vote(1, 'قیمت بالاتر از VWAP است');
+    } else if (vwap > 0 && last.close < vwap) {
+      vote(-1, 'قیمت پایین‌تر از VWAP است');
     } else {
-      reasons.add('RSI در محدوده اشباع فروش است');
+      reasons.add('VWAP به دلیل نبود حجم معتبر قابل اتکا نیست');
     }
-
-    if (last.close > previous.close) {
-      score++;
-      reasons.add('آخرین کندل نسبت به کندل قبل صعودی است');
-    } else if (last.close < previous.close) {
-      score--;
-      reasons.add('آخرین کندل نسبت به کندل قبل نزولی است');
+    if (superTrendBull && last.close > hl2) {
+      vote(1, 'SuperTrend جهت صعودی را تأیید می‌کند');
+    } else if (!superTrendBull && last.close < hl2) {
+      vote(-1, 'SuperTrend جهت نزولی را تأیید می‌کند');
     }
+    if (last.close > spanA && last.close > spanB && tenkan > kijun) {
+      vote(1, 'ابر ایچیموکو روند صعودی را تأیید می‌کند');
+    } else if (last.close < spanA && last.close < spanB && tenkan < kijun) {
+      vote(-1, 'ابر ایچیموکو روند نزولی را تأیید می‌کند');
+    }
+    if (stochRsi < 20 && last.close > previous.close) {
+      vote(1, 'Stochastic RSI از اشباع فروش رو به بالا برگشته است');
+    } else if (stochRsi > 80 && last.close < previous.close) {
+      vote(-1, 'Stochastic RSI از اشباع خرید رو به پایین برگشته است');
+    }
+    if (deviation > 0) {
+      reasons.add('انحراف معیار نوسان: ' + deviation.toStringAsPrecision(5));
+    }
+    if (atr > 0) reasons.add('ATR برای تنظیم فاصله حد ضرر و حد سود محاسبه شد');
 
     final threshold = switch (style) {
       TradingStyle.fast => 2,
-      TradingStyle.mediumTerm => 3,
-      TradingStyle.longTerm => 4,
+      TradingStyle.mediumTerm => 4,
+      TradingStyle.longTerm => 6,
     };
-
     SignalDirection direction = SignalDirection.hold;
-
     if (score >= threshold) {
       direction = SignalDirection.buy;
     } else if (score <= -threshold) {
       direction = SignalDirection.sell;
     }
-
+    // Rule-confluence score, not a statistically calibrated profit probability.
     final confidence = direction == SignalDirection.hold
-        ? 0.0
-        : min(0.95, 0.50 + (score.abs() * 0.07));
-
+      ? 0.0 : min(0.95, 0.50 + score.abs() / 16.0);
     return TradeSignal(
-      direction: direction,
-      confidence: confidence,
-      price: last.close,
-      reasons: reasons,
-      createdAt: DateTime.now(),
+      direction: direction, confidence: confidence, price: last.close,
+      reasons: reasons, createdAt: DateTime.now(),
     );
   }
 }
