@@ -54,7 +54,15 @@ class KrakenProvider implements MarketProvider, CandleMarketProvider {
     };
 
     final value = symbol.trim().toUpperCase();
-    return pairs[value] ?? value;
+    final mapped = pairs[value];
+    if (mapped != null) return mapped;
+    if (value.endsWith('USDT') && value.length > 4) {
+      return '${value.substring(0, value.length - 4)}/USDT';
+    }
+    if (value.endsWith('USD') && value.length > 3) {
+      return '${value.substring(0, value.length - 3)}/USD';
+    }
+    return value;
   }
 
   // نماد مورد استفاده در REST کراکن
