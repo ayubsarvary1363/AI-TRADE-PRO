@@ -137,7 +137,7 @@ class MarketScanner {
       }).toList()
         ..sort((a, b) => a.time.compareTo(b.time));
 
-      if (closedCandles.length < 30) {
+      if (closedCandles.length < 60) {
         _candleRejected++;
         return null;
       }
