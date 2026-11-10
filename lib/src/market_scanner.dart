@@ -76,9 +76,10 @@ class MarketScanner {
   }
 
   Duration _intervalDuration(String interval) {
-    final match = RegExp(r'^(\d+)(s|m|h|d) return const Duration(hours: 1);
-    final amount = int.tryParse(match.group(1)!) ?? 1;
-    switch (match.group(2)) {
+    if (interval.length < 2) return const Duration(hours: 1);
+    final amount = int.tryParse(interval.substring(0, interval.length - 1)) ?? 1;
+    final unit = interval.substring(interval.length - 1);
+    switch (unit) {
       case 's': return Duration(seconds: amount);
       case 'm': return Duration(minutes: amount);
       case 'h': return Duration(hours: amount);
