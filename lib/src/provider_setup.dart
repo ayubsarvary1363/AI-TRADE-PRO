@@ -1,9 +1,8 @@
-
 import 'exchange_router.dart';
 import 'market_provider.dart';
 import 'kraken_provider.dart';
 import 'coinbase_provider.dart';
-import 'yahoo_forex_provider.dart';
+import 'biquote_forex_provider.dart';
 
 class ProviderSetup {
   ProviderSetup._();
@@ -14,7 +13,9 @@ class ProviderSetup {
     // تأمین‌کنندگان عمومی داده بازار رمزارز
     registry.register(KrakenProvider());
     registry.register(CoinbaseProvider());
-    registry.register(YahooForexProvider());
+
+    // قیمت فارکس فقط از تیک تازه MT5 دریافت می‌شود.
+    registry.register(BiQuoteForexProvider());
 
     return registry;
   }
@@ -45,6 +46,6 @@ class ProviderSetup {
   static List<String> get activeProviderNames => [
         'Kraken',
         'Coinbase',
-        'Yahoo Finance FX',
+        'BiQuote Forex (MT5)',
       ];
 }
