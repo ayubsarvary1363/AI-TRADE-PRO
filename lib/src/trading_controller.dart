@@ -47,6 +47,8 @@ class TradingController extends ChangeNotifier {
   List<Candle> candles = [];
 
   DateTime? _lastProcessedCandle;
+  // Never trade immediately from historical candles after start or selection.
+  bool _awaitNextClosedCandle = true;
   DateTime? _cooldownUntil;
   double? _activeStopPrice;
   double? _activeTakeProfitPrice;
@@ -134,7 +136,8 @@ class TradingController extends ChangeNotifier {
     if (_disposed || _running) return;
 
     _running = true;
-    status = 'ربات آزمایشی در حال دریافت اطلاعات است';
+    _awaitNextClosedCandle = true;
+    status = 'ربات آزمایشی در حال دریافت اطلاعات است؛ منتظر کندل جدید';
     lastError = null;
 
     notifyListeners();
@@ -189,13 +192,16 @@ class TradingController extends ChangeNotifier {
 
     _refreshingQuote = true;
 
+    final requestedSymbol = symbol;
+    final requestedMarket = selectedMarket;
+
     try {
       final quote = await marketHub.getBestQuote(
-        symbol,
-        market: selectedMarket,
+        requestedSymbol,
+        market: requestedMarket,
       );
 
-      if (_disposed) return;
+      if (_disposed || requestedSymbol != symbol || requestedMarket != selectedMarket) return;
 
       if (quote == null ||
           !quote.isValid ||
@@ -247,15 +253,19 @@ class TradingController extends ChangeNotifier {
 
     _refreshingCandles = true;
 
+    final requestedSymbol = symbol;
+    final requestedMarket = selectedMarket;
+    final requestedInterval = interval;
+
     try {
       final result = await marketHub.fetchCandles(
-        symbol,
-        interval,
-        market: selectedMarket,
+        requestedSymbol,
+        requestedInterval,
+        market: requestedMarket,
         limit: 200,
       );
 
-      if (_disposed) return;
+      if (_disposed || requestedSymbol != symbol || requestedMarket != selectedMarket || requestedInterval != interval) return;
 
       if (result.length < 30) {
         _candlesHealthy = false;
@@ -273,6 +283,15 @@ class TradingController extends ChangeNotifier {
       );
 
       _updateErrorStatus();
+
+      // The first dataset after start/symbol/timeframe changes is historical.
+      // Record its latest closed candle but do not execute its old signal.
+      if (_awaitNextClosedCandle) {
+        _lastProcessedCandle = candles.last.time;
+        _awaitNextClosedCandle = false;
+        if (_running) status = 'اطلاعات دریافت شد؛ برای جلوگیری از معامله فوری منتظر کندل بسته‌شده جدید هستیم';
+        return;
+      }
 
       if (_quoteHealthy && _candlesHealthy) {
         _processNewSignal();
@@ -538,6 +557,7 @@ class TradingController extends ChangeNotifier {
 
     selectedMarket = value;
     symbol = value == MarketType.forex ? 'EURUSD=X' : 'BTCUSDT';
+    _awaitNextClosedCandle = true;
     latestQuote = null;
     latestSignal = null;
     candles = [];
@@ -559,6 +579,7 @@ class TradingController extends ChangeNotifier {
     if (symbol == nextSymbol) return;
 
     symbol = nextSymbol;
+    _awaitNextClosedCandle = true;
 
     latestQuote = null;
     latestSignal = null;
@@ -584,6 +605,7 @@ class TradingController extends ChangeNotifier {
     if (_disposed || interval == value) return;
 
     interval = value;
+    _awaitNextClosedCandle = true;
 
     latestSignal = null;
     candles = [];
