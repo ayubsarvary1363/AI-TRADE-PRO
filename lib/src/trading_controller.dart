@@ -418,10 +418,18 @@ class TradingController extends ChangeNotifier {
 
       if (cycle.cycleCompleted) {
         final candidate = cycle.bestOpportunity;
+        final diagnostic =
+            'قیمت نامعتبر: ${cycle.quoteRejected}، '
+            'کندل نامعتبر: ${cycle.candleRejected}، '
+            'بدون کندل جدید: ${cycle.noNewCandle}، '
+            'بدون سیگنال خرید: ${cycle.noBuySignal}، '
+            'اطمینان کمتر از ۶۰٪: ${cycle.lowConfidence}، '
+            'خرید واجدشرایط: ${cycle.buySignals}';
+
         if (candidate == null) {
-          scannerStatus = 'اسکن کامل شد؛ فرصت معتبر و کم‌ریسکی پیدا نشد';
+          scannerStatus = 'اسکن کامل شد؛ فرصت خرید پیدا نشد. $diagnostic';
           if (portfolio.positions.isEmpty) {
-            status = 'در کل بازار فرصت مناسب معامله پیدا نشد';
+            status = 'در این دور اسکن فرصت خرید واجدشرایط پیدا نشد';
           }
         } else if (portfolio.positions.isNotEmpty) {
           scannerStatus = 'بهترین فرصت ${candidate.symbol} شناسایی شد؛ تا بسته‌شدن موقعیت فعلی معامله جدیدی باز نمی‌شود';
