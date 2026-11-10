@@ -50,7 +50,6 @@ class TradingController extends ChangeNotifier {
   double? _activeStopPrice;
   double? _initialRiskDistance;
   double? _highestPriceSinceEntry;
-  String? _lastExitReason;
 
   static const Duration _stopCooldown = Duration(minutes: 10);
   static const double _atrStopMultiplier = 2.0;
@@ -394,7 +393,6 @@ class TradingController extends ChangeNotifier {
       _activeStopPrice = stopPrice;
       _initialRiskDistance = riskDistance;
       _highestPriceSinceEntry = price;
-      _lastExitReason = null;
     }
 
     status = success
@@ -493,7 +491,6 @@ class TradingController extends ChangeNotifier {
         quantity: position.quantity,
       );
       if (success) {
-        _lastExitReason = 'حد ضرر پویا فعال شد';
         _cooldownUntil = DateTime.now().add(_stopCooldown);
         _clearProtectiveState();
         status = 'خروج حفاظتی انجام شد؛ ورود مجدد موقتاً متوقف است';
@@ -595,7 +592,6 @@ class TradingController extends ChangeNotifier {
     _lastProcessedCandle = null;
     _cooldownUntil = null;
     _clearProtectiveState();
-    _lastExitReason = null;
 
     lastError = null;
     status = 'حساب آزمایشی بازنشانی شد';
