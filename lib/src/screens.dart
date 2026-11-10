@@ -265,6 +265,16 @@ class _HomeScreenState extends State<HomeScreen> {
               _controller.status,
               style: Theme.of(context).textTheme.bodySmall,
             ),
+            if (_controller.activeStopPrice != null) ...[
+              const SizedBox(height: 6),
+              Text(
+                'حد ضرر فعال: ${_controller.activeStopPrice!.toStringAsFixed(6)}',
+                style: const TextStyle(
+                  color: Colors.orangeAccent,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            ],
             if (_controller.lastError != null) ...[
               const SizedBox(height: 6),
               Text(
