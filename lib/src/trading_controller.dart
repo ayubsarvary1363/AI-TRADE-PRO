@@ -49,6 +49,7 @@ class TradingController extends ChangeNotifier {
   DateTime? _lastProcessedCandle;
   DateTime? _cooldownUntil;
   double? _activeStopPrice;
+  double? _activeTakeProfitPrice;
   double? _initialRiskDistance;
   double? _highestPriceSinceEntry;
 
@@ -373,6 +374,8 @@ class TradingController extends ChangeNotifier {
         .clamp(price * 0.008, price * 0.04)
         .toDouble();
     final stopPrice = price - riskDistance;
+    final takeProfitPrice = price + (riskDistance * 2.0);
+    final targetPoints = takeProfitPrice - price;
 
     final quantity = riskManager.calculatePositionSize(
       equity: portfolio.equity(_currentPrices),
@@ -390,10 +393,14 @@ class TradingController extends ChangeNotifier {
       symbol: symbol,
       price: price,
       quantity: quantity,
+      stopLoss: stopPrice,
+      takeProfit: takeProfitPrice,
+      targetPoints: targetPoints,
     );
 
     if (success) {
       _activeStopPrice = stopPrice;
+      _activeTakeProfitPrice = takeProfitPrice;
       _initialRiskDistance = riskDistance;
       _highestPriceSinceEntry = price;
     }
@@ -487,6 +494,20 @@ class TradingController extends ChangeNotifier {
       if (trailingStop > _activeStopPrice!) _activeStopPrice = trailingStop;
     }
 
+    if (_activeTakeProfitPrice != null && bid >= _activeTakeProfitPrice!) {
+      final success = portfolio.sell(
+        symbol: symbol,
+        price: bid,
+        quantity: position.quantity,
+      );
+      if (success) {
+        _clearProtectiveState();
+        status = 'حد سود (TP) فعال شد؛ معامله با سود بسته شد';
+        notifyListeners();
+      }
+      return;
+    }
+
     if (bid <= _activeStopPrice!) {
       final success = portfolio.sell(
         symbol: symbol,
@@ -504,6 +525,7 @@ class TradingController extends ChangeNotifier {
 
   void _clearProtectiveState() {
     _activeStopPrice = null;
+    _activeTakeProfitPrice = null;
     _initialRiskDistance = null;
     _highestPriceSinceEntry = null;
   }
