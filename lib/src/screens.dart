@@ -457,8 +457,26 @@ class _HomeScreenState extends State<HomeScreen> {
   Widget _markets() {
     final isForex = _controller.selectedMarket == MarketType.forex;
     final symbols = isForex
-        ? ['EURUSD=X', 'GBPUSD=X', 'USDJPY=X', 'AUDUSD=X', 'USDCAD=X', 'USDCHF=X']
-        : ['BTCUSDT', 'ETHUSDT', 'BNBUSDT', 'SOLUSDT', 'XRPUSDT', 'ADAUSDT', 'DOGEUSDT'];
+        ? [
+            'EURUSD=X', 'GBPUSD=X', 'USDJPY=X', 'AUDUSD=X',
+            'USDCAD=X', 'USDCHF=X', 'NZDUSD=X',
+            'EURGBP=X', 'EURJPY=X', 'EURCHF=X', 'EURAUD=X',
+            'EURCAD=X', 'EURNZD=X',
+            'GBPJPY=X', 'GBPCHF=X', 'GBPAUD=X', 'GBPCAD=X',
+            'GBPNZD=X',
+            'AUDJPY=X', 'AUDNZD=X', 'AUDCAD=X', 'AUDCHF=X',
+            'NZDJPY=X', 'CADJPY=X', 'CHFJPY=X',
+          ]
+        : [
+            'BTCUSDT', 'ETHUSDT', 'BNBUSDT', 'SOLUSDT',
+            'XRPUSDT', 'ADAUSDT', 'DOGEUSDT', 'LTCUSDT',
+            'BCHUSDT', 'LINKUSDT', 'DOTUSDT', 'AVAXUSDT',
+            'XLMUSDT', 'ATOMUSDT', 'UNIUSDT', 'ETCUSDT',
+            'FILUSDT', 'AAVEUSDT', 'NEARUSDT', 'ALGOUSDT',
+            'TRXUSDT', 'SHIBUSDT', 'PEPEUSDT', 'SUIUSDT',
+            'TONUSDT', 'ICPUSDT', 'INJUSDT', 'OPUSDT',
+            'ARBUSDT', 'APTUSDT',
+          ];
 
     return ListView(
       padding: const EdgeInsets.all(16),
