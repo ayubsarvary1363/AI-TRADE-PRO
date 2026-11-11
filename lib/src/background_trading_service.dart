@@ -43,7 +43,10 @@ class BackgroundTradingService {
   static Future<void> start() async {
     final permission = await FlutterForegroundTask.checkNotificationPermission();
     if (permission != NotificationPermission.granted) {
-      await FlutterForegroundTask.requestNotificationPermission();
+      final requested = await FlutterForegroundTask.requestNotificationPermission();
+      if (requested != NotificationPermission.granted) {
+        throw StateError('مجوز اعلان برای اجرای سرویس پس‌زمینه داده نشد');
+      }
     }
     if (await FlutterForegroundTask.isRunningService) {
       FlutterForegroundTask.sendDataToTask(jsonEncode({'type': 'start'}));
@@ -77,6 +80,7 @@ class BackgroundTradingService {
 class _TradingTaskHandler extends TaskHandler {
   TradingController? _engine;
   bool _stopping = false;
+  final List<Object> _pendingCommands = <Object>[];
 
   Future<void> _persist() async {
     final engine = _engine;
@@ -165,6 +169,13 @@ class _TradingTaskHandler extends TaskHandler {
     }
     engine.addListener(_publish);
     _publish();
+    // Commands can arrive immediately after startService(), before onStart
+    // has finished constructing the engine. Replay them only after it exists.
+    final pending = List<Object>.from(_pendingCommands);
+    _pendingCommands.clear();
+    for (final command in pending) {
+      await _handleCommand(command);
+    }
     if (saved is String && saved.isNotEmpty) {
       try {
         final decoded = jsonDecode(saved);
@@ -181,6 +192,10 @@ class _TradingTaskHandler extends TaskHandler {
 
   @override
   void onReceiveData(Object data) {
+    if (_engine == null) {
+      _pendingCommands.add(data);
+      return;
+    }
     unawaited(_handleCommand(data));
   }
 
@@ -263,6 +278,7 @@ class BackgroundTradingController extends ChangeNotifier {
   TradeSignal? latestSignal;
   List<Candle> candles = [];
   bool _running = false;
+  bool _starting = false;
   bool _disposed = false;
   Map<String, double> _prices = {};
 
@@ -313,7 +329,7 @@ class BackgroundTradingController extends ChangeNotifier {
     }
   }
 
-  bool get isRunning => _running;
+  bool get isRunning => _running || _starting;
   bool get isRefreshing => false;
   bool get hasValidPrice => latestQuote != null &&
       latestQuote!.isFresh(maximumAge: const Duration(seconds: 15));
@@ -334,6 +350,7 @@ class BackgroundTradingController extends ChangeNotifier {
       if (decoded is! Map || decoded['type'] != 'snapshot') return;
       final snapshot = Map<String, dynamic>.from(decoded);
       _running = snapshot['running'] == true;
+      _starting = false;
       symbol = snapshot['symbol']?.toString() ?? symbol;
       interval = snapshot['interval']?.toString() ?? interval;
       style = TradingStyle.values.firstWhere(
@@ -394,11 +411,38 @@ class BackgroundTradingController extends ChangeNotifier {
   }
 
   Future<void> start() async {
-    if (_disposed || _running) return;
-    await BackgroundTradingService.start();
+    if (_disposed || _running || _starting) return;
+    _starting = true;
+    lastError = null;
+    status = 'در حال راه‌اندازی سرویس پس‌زمینه…';
+    notifyListeners();
+    try {
+      await BackgroundTradingService.start();
+      // The service publishes the authoritative running state after its
+      // engine is ready. Do not mark the bot active merely because Android
+      // accepted the service request.
+    } catch (error) {
+      _starting = false;
+      _running = false;
+      lastError = error.toString();
+      status = 'راه‌اندازی ربات ناموفق بود';
+      notifyListeners();
+    }
   }
 
-  void stop() => BackgroundTradingService.stop();
+  Future<void> stop() async {
+    if (_disposed) return;
+    _starting = false;
+    status = 'در حال توقف ربات…';
+    notifyListeners();
+    try {
+      await BackgroundTradingService.stop();
+    } catch (error) {
+      lastError = error.toString();
+      status = 'توقف ربات ناموفق بود';
+      notifyListeners();
+    }
+  }
   void refreshMarket() => BackgroundTradingService.send({'type': 'refresh'});
   void refreshQuote() => refreshMarket();
   void refreshCandles() => refreshMarket();
