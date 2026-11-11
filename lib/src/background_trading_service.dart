@@ -268,9 +268,49 @@ class BackgroundTradingController extends ChangeNotifier {
 
   BackgroundTradingController() {
     FlutterForegroundTask.addTaskDataCallback(_onTaskData);
+    _restoreCachedState();
     FlutterForegroundTask.isRunningService.then((running) {
       if (!_disposed && running) BackgroundTradingService.send({'type': 'refresh'});
     });
+  }
+
+  Future<void> _restoreCachedState() async {
+    try {
+      final serviceRunning = await FlutterForegroundTask.isRunningService;
+      if (_disposed || serviceRunning) return;
+      final saved = await FlutterForegroundTask.getData(key: 'engine_state');
+      if (_disposed || saved is! String || saved.isEmpty) return;
+      final decoded = jsonDecode(saved);
+      if (decoded is! Map) return;
+      final state = Map<String, dynamic>.from(decoded);
+      symbol = state['symbol']?.toString() ?? symbol;
+      interval = state['interval']?.toString() ?? interval;
+      style = TradingStyle.values.firstWhere(
+        (value) => value.name == state['style'],
+        orElse: () => TradingStyle.mediumTerm,
+      );
+      final account = state['portfolio'];
+      if (account is Map) {
+        portfolio.restoreFromJson(Map<String, dynamic>.from(account));
+      }
+      final rawPrices = state['lastPrices'];
+      if (rawPrices is Map) {
+        _prices = {};
+        rawPrices.forEach((key, value) {
+          if (value is num) _prices[key.toString()] = value.toDouble();
+        });
+      }
+      _running = false;
+      status = state['wasRunning'] == true
+          ? 'سرویس در انتظار بازیابی است'
+          : 'ربات آزمایشی متوقف است';
+      notifyListeners();
+    } catch (error) {
+      if (!_disposed) {
+        lastError = 'بازیابی حساب آزمایشی ناموفق بود: ' + error.toString();
+        notifyListeners();
+      }
+    }
   }
 
   bool get isRunning => _running;
