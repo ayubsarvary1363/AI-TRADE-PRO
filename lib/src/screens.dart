@@ -639,11 +639,8 @@ class _HomeScreenState extends State<HomeScreen> {
         final isBuy = fill.side == SignalDirection.buy;
         final position = _controller.portfolio.positions[fill.symbol];
         final isOpen = isBuy && position != null;
-        final isCurrentSymbol = _controller.symbol == fill.symbol;
         final digits = fill.symbol.contains('=X') ? 5 : 6;
-        final current = isCurrentSymbol && _controller.hasValidPrice
-            ? _controller.currentPrice
-            : null;
+        final current = _controller.priceFor(fill.symbol);
         final openPnl = isOpen && current != null
             ? (current - position.averageEntryPrice) * position.quantity
             : null;
@@ -652,9 +649,7 @@ class _HomeScreenState extends State<HomeScreen> {
             ? Colors.grey
             : pnl >= 0 ? Colors.greenAccent : Colors.redAccent;
         final notional = fill.price * fill.quantity;
-        final shownStopLoss = isOpen && isCurrentSymbol
-            ? (_controller.activeStopPrice ?? fill.stopLoss)
-            : fill.stopLoss;
+        final shownStopLoss = isOpen ? fill.stopLoss : fill.stopLoss;
 
         String priceText(double? value) => value == null
             ? '—'
@@ -731,6 +726,15 @@ class _HomeScreenState extends State<HomeScreen> {
                     detail('تارگت پوینت', isBuy ? priceText(fill.targetPoints) : '—'),
                     detail('حجم معامله', '${fill.quantity.toStringAsFixed(6)}'),
                     detail('ارزش معامله', '${notional.toStringAsFixed(3)} USDT'),
+                  ],
+                ),
+                const SizedBox(height: 12),
+                Row(
+                  children: [
+                    detail('قیمت فعلی', current == null ? 'دریافت نشده' : priceText(current),
+                        color: current == null ? Colors.orangeAccent : Colors.lightBlueAccent),
+                    detail('قیمت ورود', priceText(fill.price)),
+                    detail('جهت معامله', isBuy ? 'خرید' : 'فروش'),
                   ],
                 ),
                 const Divider(height: 20),
