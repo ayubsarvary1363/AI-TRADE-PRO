@@ -25,6 +25,9 @@ dependencies:
   # نمودار قیمت و معاملات
   fl_chart: ^0.69.0
 
+  # Android foreground service for persistent demo trading
+  flutter_foreground_task: 9.0.0
+
 dev_dependencies:
   flutter_test:
     sdk: flutter
