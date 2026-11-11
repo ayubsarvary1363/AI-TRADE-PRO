@@ -67,6 +67,8 @@ class TradingController extends ChangeNotifier {
   static const double _trailAtrMultiplier = 1.8;
 
   final Map<String, double> _lastPrices = {};
+  final Map<String, MarketQuote> _tradeQuotes = {};
+  bool _refreshingTradeQuotes = false;
 
   String status = 'آماده دریافت اطلاعات بازار';
   String? lastError;
@@ -122,6 +124,22 @@ class TradingController extends ChangeNotifier {
 
   String get quoteStatus => marketHub.lastQuoteStatus;
 
+  /// Returns only a genuinely fresh quote for the requested trade symbol.
+  double? priceFor(String value) {
+    final quote = _tradeQuotes[value.toUpperCase()];
+    if (quote == null ||
+        !quote.isValid ||
+        !quote.isFresh(maximumAge: const Duration(seconds: 15))) {
+      return null;
+    }
+    return quote.midPrice;
+  }
+
+  MarketType _marketForSymbol(String value) =>
+      value.toUpperCase().endsWith('=X')
+          ? MarketType.forex
+          : MarketType.crypto;
+
   String get candleStatus => marketHub.lastCandleStatus;
 
   void _updateErrorStatus() {
@@ -163,6 +181,7 @@ class TradingController extends ChangeNotifier {
       (_) {
         refreshQuote();
         refreshOpenPositionQuote();
+        refreshTradeQuotes();
       },
     );
 
@@ -246,6 +265,7 @@ class TradingController extends ChangeNotifier {
       }
 
       latestQuote = quote;
+      _tradeQuotes[symbol.toUpperCase()] = quote;
 
       _lastPrices[symbol] = quote.midPrice;
 
@@ -294,6 +314,7 @@ class TradingController extends ChangeNotifier {
         return;
       }
 
+      _tradeQuotes[openSymbol.toUpperCase()] = quote;
       _lastPrices[openSymbol] = quote.midPrice;
       _manageOpenPositionFor(
         openSymbol,
@@ -305,6 +326,43 @@ class TradingController extends ChangeNotifier {
       // A failed quote must never be treated as a valid exit price.
     } finally {
       _refreshingPositionQuote = false;
+      if (!_disposed) notifyListeners();
+    }
+  }
+
+  /// Refresh quotes for every symbol that appears in trade history so each
+  /// trade row can show its own current market price, not the selected symbol.
+  Future<void> refreshTradeQuotes() async {
+    if (_disposed || !_running || _refreshingTradeQuotes) return;
+
+    final symbols = <String>{
+      ...portfolio.fills.map((fill) => fill.symbol),
+      ...portfolio.positions.keys,
+    };
+    if (symbols.isEmpty) return;
+
+    _refreshingTradeQuotes = true;
+    try {
+      await Future.wait(symbols.map((value) async {
+        final market = _marketForSymbol(value);
+        try {
+          final quote = await marketHub.getBestQuote(value, market: market);
+          if (_disposed || quote == null || !quote.isValid ||
+              quote.symbol.toUpperCase() != value.toUpperCase() ||
+              !quote.isFresh(maximumAge: const Duration(seconds: 15))) {
+            return;
+          }
+          _tradeQuotes[value.toUpperCase()] = quote;
+          _lastPrices[value] = quote.midPrice;
+        } catch (_) {
+          // Keep the last quote timestamp; priceFor() will hide it when stale.
+        }
+      }));
+      if (!_disposed) {
+        portfolio.updateEquity(_currentPrices);
+      }
+    } finally {
+      _refreshingTradeQuotes = false;
       if (!_disposed) notifyListeners();
     }
   }
@@ -385,6 +443,7 @@ class TradingController extends ChangeNotifier {
       );
 
       for (final result in cycle.batch) {
+        _tradeQuotes[result.symbol.toUpperCase()] = result.quote;
         _lastPrices[result.symbol] = result.quote.midPrice;
         _scannerCandles[result.symbol] = result.candles;
 
