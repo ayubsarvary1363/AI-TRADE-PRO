@@ -54,10 +54,10 @@ jobs:
           s = p.read_text()
           marker = '<manifest '
           idx = s.find('>', s.find(marker)) + 1
-          permissions = '\\n    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />\\n    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />\\n    <uses-permission android:name="android.permission.WAKE_LOCK" />'
+          permissions = '\n    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />\n    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />\n    <uses-permission android:name="android.permission.WAKE_LOCK" />'
           s = s[:idx] + permissions + s[idx:]
           app_end = s.rfind('</application>')
-          service = '\\n        <service android:name="com.pravera.flutter_foreground_task.service.ForegroundService" android:foregroundServiceType="dataSync" android:exported="false" />\\n    '
+          service = '\n        <service android:name="com.pravera.flutter_foreground_task.service.ForegroundService" android:foregroundServiceType="dataSync" android:exported="false" />\n    '
           s = s[:app_end] + service + s[app_end:]
           p.write_text(s)
           PY
