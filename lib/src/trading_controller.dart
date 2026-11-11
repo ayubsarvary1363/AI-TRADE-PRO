@@ -56,11 +56,11 @@ class TradingController extends ChangeNotifier {
 
   // Never trade immediately from historical candles after start or selection.
   bool _awaitNextClosedCandle = true;
-  DateTime? _cooldownUntil;
-  double? _activeStopPrice;
-  double? _activeTakeProfitPrice;
-  double? _initialRiskDistance;
-  double? _highestPriceSinceEntry;
+  final Map<String, DateTime> _cooldownUntilBySymbol = {};
+  final Map<String, double> _activeStopPrices = {};
+  final Map<String, double> _activeTakeProfitPrices = {};
+  final Map<String, double> _initialRiskDistances = {};
+  final Map<String, double> _highestPricesSinceEntry = {};
 
   static const Duration _stopCooldown = Duration(minutes: 10);
   static const double _atrStopMultiplier = 2.0;
@@ -97,7 +97,7 @@ class TradingController extends ChangeNotifier {
 
   bool get hasValidCandles => candles.length >= 60;
 
-  double? get activeStopPrice => _activeStopPrice;
+  double? get activeStopPrice => _activeStopPrices[symbol];
 
   double get currentPrice {
     if (!hasValidPrice) return 0;
@@ -180,7 +180,6 @@ class TradingController extends ChangeNotifier {
       const Duration(seconds: 2),
       (_) {
         refreshQuote();
-        refreshOpenPositionQuote();
         refreshTradeQuotes();
       },
     );
@@ -295,35 +294,25 @@ class TradingController extends ChangeNotifier {
     if (_disposed || !_running || _refreshingPositionQuote ||
         portfolio.positions.isEmpty) return;
 
-    final openSymbol = portfolio.positions.keys.first;
-    if (openSymbol == symbol) return;
-
+    final openSymbols = portfolio.positions.keys.toList();
+    if (openSymbols.isEmpty) return;
     _refreshingPositionQuote = true;
     try {
-      final market = openSymbol.endsWith('=X')
-          ? MarketType.forex
-          : MarketType.crypto;
-      final quote = await marketHub.getBestQuote(
-        openSymbol,
-        market: market,
-      );
-      if (_disposed || !_running || quote == null ||
-          quote.symbol.toUpperCase() != openSymbol.toUpperCase() ||
-          !quote.isValid ||
-          !quote.isFresh(maximumAge: const Duration(seconds: 15))) {
-        return;
-      }
-
-      _tradeQuotes[openSymbol.toUpperCase()] = quote;
-      _lastPrices[openSymbol] = quote.midPrice;
-      _manageOpenPositionFor(
-        openSymbol,
-        quote,
-        _scannerCandles[openSymbol] ?? const <Candle>[],
-      );
+      await Future.wait(openSymbols.map((openSymbol) async {
+        try {
+          final quote = await marketHub.getBestQuote(openSymbol,
+            market: _marketForSymbol(openSymbol));
+          if (_disposed || !_running || quote == null ||
+              quote.symbol.toUpperCase() != openSymbol.toUpperCase() ||
+              !quote.isValid ||
+              !quote.isFresh(maximumAge: const Duration(seconds: 15))) return;
+          _tradeQuotes[openSymbol.toUpperCase()] = quote;
+          _lastPrices[openSymbol] = quote.midPrice;
+          _manageOpenPositionFor(openSymbol, quote,
+            _scannerCandles[openSymbol] ?? const <Candle>[]);
+        } catch (_) {}
+      }));
       portfolio.updateEquity(_currentPrices);
-    } catch (_) {
-      // A failed quote must never be treated as a valid exit price.
     } finally {
       _refreshingPositionQuote = false;
       if (!_disposed) notifyListeners();
@@ -354,6 +343,10 @@ class TradingController extends ChangeNotifier {
           }
           _tradeQuotes[value.toUpperCase()] = quote;
           _lastPrices[value] = quote.midPrice;
+          if (portfolio.positions.containsKey(value)) {
+            _manageOpenPositionFor(value, quote,
+              _scannerCandles[value] ?? const <Candle>[]);
+          }
         } catch (_) {
           // Keep the last quote timestamp; priceFor() will hide it when stale.
         }
@@ -440,6 +433,7 @@ class TradingController extends ChangeNotifier {
         interval: interval,
         style: style,
         batchSize: 4,
+        excludedSymbols: portfolio.positions.keys.toSet(),
       );
 
       for (final result in cycle.batch) {
@@ -457,7 +451,7 @@ class TradingController extends ChangeNotifier {
               quantity: position.quantity,
             );
             if (closed) {
-              _clearProtectiveState();
+              _clearProtectiveState(result.symbol);
               status = 'سیگنال خروج برای ${result.symbol} تأیید شد؛ موقعیت بسته شد';
             }
           } else {
@@ -490,8 +484,8 @@ class TradingController extends ChangeNotifier {
           if (portfolio.positions.isEmpty) {
             status = 'در این دور اسکن فرصت خرید واجدشرایط پیدا نشد';
           }
-        } else if (portfolio.positions.isNotEmpty) {
-          scannerStatus = 'بهترین فرصت ${candidate.symbol} شناسایی شد؛ تا بسته‌شدن موقعیت فعلی معامله جدیدی باز نمی‌شود';
+        } else if (portfolio.positions.containsKey(candidate.symbol)) {
+          scannerStatus = 'نماد ${candidate.symbol} از قبل موقعیت باز دارد؛ سایر نمادها مستقل بررسی می‌شوند';
         } else {
           final freshQuote = await marketHub.getBestQuote(
             candidate.symbol,
@@ -523,14 +517,15 @@ class TradingController extends ChangeNotifier {
     MarketQuote quote,
   ) {
     if (!_running ||
-        portfolio.positions.isNotEmpty ||
+        portfolio.positions.containsKey(candidate.symbol) ||
         candidate.signal.direction != SignalDirection.buy ||
         candidate.signal.confidence < 0.60 ||
         !quote.isFresh(maximumAge: const Duration(seconds: 15))) {
       return;
     }
 
-    if (_cooldownUntil != null && DateTime.now().isBefore(_cooldownUntil!)) {
+    final cooldownUntil = _cooldownUntilBySymbol[candidate.symbol];
+    if (cooldownUntil != null && DateTime.now().isBefore(cooldownUntil)) {
       scannerStatus = 'پس از خروج زیان‌ده، دوره مکث فعال است';
       return;
     }
@@ -586,10 +581,10 @@ class TradingController extends ChangeNotifier {
     );
 
     if (success) {
-      _activeStopPrice = stopPrice;
-      _activeTakeProfitPrice = takeProfitPrice;
-      _initialRiskDistance = riskDistance;
-      _highestPriceSinceEntry = price;
+      _activeStopPrices[candidate.symbol] = stopPrice;
+      _activeTakeProfitPrices[candidate.symbol] = takeProfitPrice;
+      _initialRiskDistances[candidate.symbol] = riskDistance;
+      _highestPricesSinceEntry[candidate.symbol] = price;
       _lastPrices[candidate.symbol] = quote.midPrice;
       scannerStatus = 'بهترین فرصت انتخاب شد: ${candidate.symbol}';
       status = 'خرید آزمایشی خودکار روی ${candidate.symbol} ثبت شد';
@@ -628,22 +623,24 @@ class TradingController extends ChangeNotifier {
   ) {
     if (!_running) return;
     final position = portfolio.positions[positionSymbol];
-    if (position == null || _activeStopPrice == null) return;
+    final activeStop = _activeStopPrices[positionSymbol];
+    if (position == null || activeStop == null) return;
 
     final bid = quote.bid;
     if (bid <= 0 || !bid.isFinite) return;
 
-    final previousHigh = _highestPriceSinceEntry ?? position.averageEntryPrice;
-    if (bid > previousHigh) _highestPriceSinceEntry = bid;
-    final high = _highestPriceSinceEntry ?? bid;
+    final previousHigh = _highestPricesSinceEntry[positionSymbol] ?? position.averageEntryPrice;
+    if (bid > previousHigh) _highestPricesSinceEntry[positionSymbol] = bid;
+    final high = _highestPricesSinceEntry[positionSymbol] ?? bid;
     final atr = _calculateAtr(positionCandles, 14);
-    final initialRisk = _initialRiskDistance ??
-        (position.averageEntryPrice - _activeStopPrice!);
+    final initialRisk = _initialRiskDistances[positionSymbol] ??
+        (position.averageEntryPrice - activeStop);
 
     if (initialRisk > 0 &&
         high >= position.averageEntryPrice + initialRisk * 1.25) {
       final breakEven = position.averageEntryPrice * 1.002;
-      if (breakEven > _activeStopPrice!) _activeStopPrice = breakEven;
+      final currentStop = _activeStopPrices[positionSymbol] ?? activeStop;
+      if (breakEven > currentStop) _activeStopPrices[positionSymbol] = breakEven;
     }
 
     if (atr > 0 && initialRisk > 0 &&
@@ -653,43 +650,46 @@ class TradingController extends ChangeNotifier {
               position.averageEntryPrice * 0.035)
           .toDouble();
       final trailingStop = high - trailDistance;
-      if (trailingStop > _activeStopPrice!) _activeStopPrice = trailingStop;
+      final currentStop = _activeStopPrices[positionSymbol] ?? activeStop;
+      if (trailingStop > currentStop) _activeStopPrices[positionSymbol] = trailingStop;
     }
 
-    if (_activeTakeProfitPrice != null && bid >= _activeTakeProfitPrice!) {
+    final takeProfit = _activeTakeProfitPrices[positionSymbol];
+    final stopPrice = _activeStopPrices[positionSymbol] ?? activeStop;
+    if (takeProfit != null && bid >= takeProfit) {
       final success = portfolio.sell(
         symbol: positionSymbol,
         price: bid,
         quantity: position.quantity,
       );
       if (success) {
-        _clearProtectiveState();
-        status = 'حد سود (TP) فعال شد؛ معامله با سود بسته شد';
+        _clearProtectiveState(positionSymbol);
+        status = 'حد سود (TP) برای $positionSymbol فعال شد؛ معامله با سود بسته شد';
         notifyListeners();
       }
       return;
     }
 
-    if (bid <= _activeStopPrice!) {
+    if (bid <= stopPrice) {
       final success = portfolio.sell(
         symbol: positionSymbol,
         price: bid,
         quantity: position.quantity,
       );
       if (success) {
-        _cooldownUntil = DateTime.now().add(_stopCooldown);
-        _clearProtectiveState();
-        status = 'خروج حفاظتی انجام شد؛ ورود مجدد موقتاً متوقف است';
+        _cooldownUntilBySymbol[positionSymbol] = DateTime.now().add(_stopCooldown);
+        _clearProtectiveState(positionSymbol);
+        status = 'خروج حفاظتی $positionSymbol انجام شد؛ مکث ورود مجدد فقط برای همین نماد فعال است';
         notifyListeners();
       }
     }
   }
 
-  void _clearProtectiveState() {
-    _activeStopPrice = null;
-    _activeTakeProfitPrice = null;
-    _initialRiskDistance = null;
-    _highestPriceSinceEntry = null;
+  void _clearProtectiveState(String positionSymbol) {
+    _activeStopPrices.remove(positionSymbol);
+    _activeTakeProfitPrices.remove(positionSymbol);
+    _initialRiskDistances.remove(positionSymbol);
+    _highestPricesSinceEntry.remove(positionSymbol);
   }
 
   // -------------------- SETTINGS --------------------
@@ -798,8 +798,11 @@ class TradingController extends ChangeNotifier {
     _quoteHealthy = false;
     _candlesHealthy = false;
 
-    _cooldownUntil = null;
-    _clearProtectiveState();
+    _cooldownUntilBySymbol.clear();
+    _activeStopPrices.clear();
+    _activeTakeProfitPrices.clear();
+    _initialRiskDistances.clear();
+    _highestPricesSinceEntry.clear();
 
     lastError = null;
     status = 'حساب آزمایشی بازنشانی شد';
