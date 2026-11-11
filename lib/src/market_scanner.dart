@@ -182,6 +182,7 @@ class MarketScanner {
     required String interval,
     required TradingStyle style,
     int batchSize = 4,
+    Set<String> excludedSymbols = const <String>{},
   }) async {
     final universe = <MapEntry<String, MarketType>>[
       ...cryptoSymbols.map((s) => MapEntry(s, MarketType.crypto)),
@@ -203,7 +204,8 @@ class MarketScanner {
     final valid = results.whereType<MarketScanResult>().toList();
 
     for (final result in valid) {
-      if (result.isNewCandle &&
+      if (!excludedSymbols.contains(result.symbol) &&
+          result.isNewCandle &&
           result.signal.direction == SignalDirection.buy &&
           result.signal.confidence >= 0.60) {
         if (_bestInCycle == null ||
