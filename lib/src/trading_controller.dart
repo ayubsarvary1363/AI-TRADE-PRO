@@ -48,6 +48,19 @@ class TradingController extends ChangeNotifier {
   DateTime? _lastProcessedCandle;
 
   final Map<String, double> _lastPrices = {};
+  final Map<String, MarketQuote> _lastQuotes = {};
+
+  /// Returns a fresh quote for a symbol that has a recorded trade.
+  /// Historical prices are retained for account valuation, but are not
+  /// presented as live prices when their quote has become stale.
+  double? priceFor(String value) {
+    final quote = _lastQuotes[value.trim().toUpperCase()];
+    if (quote == null ||
+        !quote.isFresh(maximumAge: const Duration(seconds: 15))) {
+      return null;
+    }
+    return quote.midPrice;
+  }
 
   String status = 'آماده دریافت اطلاعات بازار';
   String? lastError;
@@ -178,42 +191,60 @@ class TradingController extends ChangeNotifier {
     _refreshingQuote = true;
 
     try {
-      final quote = await marketHub.getBestQuote(
-        symbol,
-        market: MarketType.crypto,
+      // Refresh the selected symbol plus every symbol represented in the
+      // trade history/open positions, so trade rows can show their own quote.
+      final trackedSymbols = <String>{
+        symbol.toUpperCase(),
+        ...portfolio.fills.map((fill) => fill.symbol.toUpperCase()),
+        ...portfolio.positions.keys.map((value) => value.toUpperCase()),
+      };
+
+      final results = await Future.wait(
+        trackedSymbols.map((trackedSymbol) async {
+          try {
+            final quote = await marketHub.getBestQuote(
+              trackedSymbol,
+              market: MarketType.crypto,
+            );
+            return MapEntry(trackedSymbol, quote);
+          } catch (_) {
+            return MapEntry<String, MarketQuote?>(trackedSymbol, null);
+          }
+        }),
       );
 
       if (_disposed) return;
 
-      if (quote == null ||
-          !quote.isValid ||
-          !quote.isFresh(
-            maximumAge: const Duration(seconds: 15),
-          )) {
-        _quoteHealthy = false;
-        _updateErrorStatus();
-        return;
+      MarketQuote? selectedQuote;
+      for (final result in results) {
+        final quote = result.value;
+        if (quote == null ||
+            !quote.isValid ||
+            quote.symbol.toUpperCase() != result.key ||
+            !quote.isFresh(maximumAge: const Duration(seconds: 15))) {
+          continue;
+        }
+
+        _lastQuotes[result.key] = quote;
+        _lastPrices[result.key] = quote.midPrice;
+
+        if (result.key == symbol.toUpperCase()) {
+          selectedQuote = quote;
+        }
       }
 
-      if (quote.symbol.toUpperCase() != symbol.toUpperCase()) {
+      if (selectedQuote == null) {
         _quoteHealthy = false;
-        marketHub.lastQuoteStatus = 'نماد دریافتی با نماد انتخابی متفاوت است';
         _updateErrorStatus();
-        return;
-      }
+      } else {
+        latestQuote = selectedQuote;
+        _quoteHealthy = true;
+        portfolio.updateEquity(_currentPrices);
+        _updateErrorStatus();
 
-      latestQuote = quote;
-
-      _lastPrices[symbol] = quote.midPrice;
-
-      _quoteHealthy = true;
-
-      portfolio.updateEquity(_currentPrices);
-
-      _updateErrorStatus();
-
-      if (lastError == null && _running) {
-        status = 'قیمت بازار به‌روزرسانی شد';
+        if (lastError == null && _running) {
+          status = 'قیمت بازار به‌روزرسانی شد';
+        }
       }
     } catch (error) {
       if (!_disposed) {
@@ -484,6 +515,7 @@ class TradingController extends ChangeNotifier {
     candles = [];
 
     _lastPrices.clear();
+    _lastQuotes.clear();
 
     _quoteHealthy = false;
     _candlesHealthy = false;
