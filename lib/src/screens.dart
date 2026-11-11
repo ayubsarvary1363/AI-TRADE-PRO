@@ -6,6 +6,7 @@ import 'engine.dart';
 import 'exchange_router.dart';
 import 'market_hub.dart';
 import 'provider_setup.dart';
+import 'market_symbols.dart';
 import 'trading_controller.dart';
 
 // =====================================================
@@ -24,6 +25,8 @@ class _HomeScreenState extends State<HomeScreen> {
   late final TradingController _controller;
 
   int _selectedTab = 0;
+  bool _startingBot = false;
+  String? _serviceError;
 
   @override
   void initState() {
@@ -102,6 +105,31 @@ class _HomeScreenState extends State<HomeScreen> {
         );
       },
     );
+  }
+
+  Future<void> _toggleBot(bool enabled) async {
+    if (_startingBot) return;
+    setState(() {
+      _startingBot = true;
+      _serviceError = null;
+    });
+    try {
+      if (enabled) {
+        // Start the Android foreground service first so startup failures
+        // are reported instead of leaving a misleading active switch.
+        await startBackgroundTradingService();
+        await _controller.start();
+      } else {
+        _controller.stop();
+        await stopBackgroundTradingService();
+      }
+    } catch (error) {
+      _controller.stop();
+      try { await stopBackgroundTradingService(); } catch (_) {}
+      _serviceError = 'راه‌اندازی سرویس پس‌زمینه ناموفق بود: $error';
+    } finally {
+      if (mounted) setState(() => _startingBot = false);
+    }
   }
 
   // -------------------- DASHBOARD --------------------
@@ -241,25 +269,17 @@ class _HomeScreenState extends State<HomeScreen> {
                 const SizedBox(width: 8),
                 Expanded(
                   child: Text(
-                    _controller.isRunning
-                        ? 'ربات آزمایشی فعال است'
-                        : 'ربات متوقف است',
+                    _startingBot
+                        ? 'در حال راه‌اندازی موتور معاملات...'
+                        : (_controller.isRunning ? 'ربات آزمایشی فعال است' : 'ربات متوقف است'),
                     style: const TextStyle(
                       fontWeight: FontWeight.bold,
                     ),
                   ),
                 ),
                 Switch(
-                  value: _controller.isRunning,
-                  onChanged: (value) {
-                    if (value) {
-                      _controller.start();
-                      startBackgroundTradingService();
-                    } else {
-                      _controller.stop();
-                      stopBackgroundTradingService();
-                    }
-                  },
+                  value: _controller.isRunning || _startingBot,
+                  onChanged: _startingBot ? null : _toggleBot,
                 ),
               ],
             ),
@@ -268,6 +288,10 @@ class _HomeScreenState extends State<HomeScreen> {
               _controller.status,
               style: Theme.of(context).textTheme.bodySmall,
             ),
+            if (_serviceError != null) ...[
+              const SizedBox(height: 6),
+              Text(_serviceError!, style: const TextStyle(color: Colors.redAccent, fontSize: 12)),
+            ],
             if (_controller.lastError != null) ...[
               const SizedBox(height: 6),
               Text(
@@ -448,15 +472,7 @@ class _HomeScreenState extends State<HomeScreen> {
   // -------------------- MARKETS --------------------
 
   Widget _markets() {
-    final symbols = [
-      'BTCUSDT',
-      'ETHUSDT',
-      'BNBUSDT',
-      'SOLUSDT',
-      'XRPUSDT',
-      'ADAUSDT',
-      'DOGEUSDT',
-    ];
+    final symbols = MarketSymbols.crypto;
 
     return ListView(
       padding: const EdgeInsets.all(16),
