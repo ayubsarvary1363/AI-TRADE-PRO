@@ -531,6 +531,7 @@ class TradingController extends ChangeNotifier {
   /// Snapshot required to resume the same demo account after service restart.
   Map<String, dynamic> exportPersistentState() => {
         'portfolio': portfolio.toJson(),
+        'lastPrices': Map<String, double>.from(_lastPrices),
         'symbol': symbol,
         'interval': interval,
         'style': style.name,
@@ -544,6 +545,14 @@ class TradingController extends ChangeNotifier {
     final account = data['portfolio'];
     if (account is Map) {
       portfolio.restoreFromJson(Map<String, dynamic>.from(account));
+    }
+    final savedPrices = data['lastPrices'];
+    if (savedPrices is Map) {
+      _lastPrices
+        ..clear()
+        ..addAll(savedPrices.map(
+          (key, value) => MapEntry(key.toString(), (value as num).toDouble()),
+        ));
     }
     final savedSymbol = data['symbol'];
     if (savedSymbol is String && savedSymbol.trim().isNotEmpty) {
