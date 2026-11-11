@@ -55,6 +55,7 @@ class BackgroundTradingService {
       notificationInitialRoute: '/',
       callback: startCallback,
     );
+    FlutterForegroundTask.sendDataToTask(jsonEncode({'type': 'start'}));
   }
 
   static void send(Map<String, dynamic> command) {
