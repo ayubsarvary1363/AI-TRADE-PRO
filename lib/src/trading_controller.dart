@@ -528,6 +528,54 @@ class TradingController extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// Snapshot required to resume the same demo account after service restart.
+  Map<String, dynamic> exportPersistentState() => {
+        'portfolio': portfolio.toJson(),
+        'lastPrices': Map<String, double>.from(_lastPrices),
+        'symbol': symbol,
+        'interval': interval,
+        'style': style.name,
+        'lastProcessedCandle': _lastProcessedCandle?.toIso8601String(),
+        'wasRunning': _running,
+      };
+
+  /// Restores account and strategy state before the engine is started again.
+  void restorePersistentState(Map<String, dynamic> data) {
+    if (_disposed) return;
+    final account = data['portfolio'];
+    if (account is Map) {
+      portfolio.restoreFromJson(Map<String, dynamic>.from(account));
+    }
+    final savedPrices = data['lastPrices'];
+    if (savedPrices is Map) {
+      _lastPrices
+        ..clear()
+        ..addAll(savedPrices.map(
+          (key, value) => MapEntry(key.toString(), (value as num).toDouble()),
+        ));
+    }
+    final savedSymbol = data['symbol'];
+    if (savedSymbol is String && savedSymbol.trim().isNotEmpty) {
+      symbol = savedSymbol.trim().toUpperCase();
+    }
+    final savedInterval = data['interval'];
+    if (savedInterval is String && savedInterval.isNotEmpty) {
+      interval = savedInterval;
+    }
+    final savedStyle = data['style'];
+    if (savedStyle is String) {
+      style = TradingStyle.values.firstWhere(
+        (value) => value.name == savedStyle,
+        orElse: () => TradingStyle.mediumTerm,
+      );
+    }
+    final candleTime = data['lastProcessedCandle'];
+    _lastProcessedCandle = candleTime is String
+        ? DateTime.tryParse(candleTime)
+        : null;
+    notifyListeners();
+  }
+
   // -------------------- DISPOSE --------------------
 
   @override
