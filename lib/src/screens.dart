@@ -642,14 +642,13 @@ class _HomeScreenState extends State<HomeScreen> {
         final digits = fill.symbol.contains('=X') ? 5 : 6;
         final current = _controller.priceFor(fill.symbol);
         final openPnl = isOpen && current != null
-            ? (current - position.averageEntryPrice) * position.quantity
+            ? (current - position!.averageEntryPrice) * position.quantity
             : null;
         final pnl = isBuy ? openPnl : fill.realizedPnl;
         final pnlColor = pnl == null
             ? Colors.grey
             : pnl >= 0 ? Colors.greenAccent : Colors.redAccent;
         final notional = fill.price * fill.quantity;
-        final shownStopLoss = isOpen ? fill.stopLoss : fill.stopLoss;
 
         String priceText(double? value) => value == null
             ? '—'
@@ -716,7 +715,7 @@ class _HomeScreenState extends State<HomeScreen> {
                 Row(
                   children: [
                     detail('نقطه ورود', isBuy ? priceText(fill.price) : '—'),
-                    detail('حد ضرر (SL)', isBuy ? priceText(shownStopLoss) : '—'),
+                    detail('حد ضرر (SL)', isBuy ? priceText(fill.stopLoss) : '—'),
                     detail('TP / حد سود', isBuy ? priceText(fill.takeProfit) : '—'),
                   ],
                 ),
