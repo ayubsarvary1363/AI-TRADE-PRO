@@ -1,6 +1,7 @@
 
 import 'package:flutter/material.dart';
 import 'dart:math';
+import 'background_trading_service.dart';
 import 'engine.dart';
 import 'exchange_router.dart';
 import 'market_hub.dart';
@@ -253,8 +254,10 @@ class _HomeScreenState extends State<HomeScreen> {
                   onChanged: (value) {
                     if (value) {
                       _controller.start();
+                      startBackgroundTradingService();
                     } else {
                       _controller.stop();
+                      stopBackgroundTradingService();
                     }
                   },
                 ),
