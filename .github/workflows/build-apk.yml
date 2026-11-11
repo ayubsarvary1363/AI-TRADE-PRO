@@ -7,6 +7,7 @@ on:
     branches:
       - main
       - background-trading-service
+      - background-service-from-42963790713
 
 permissions:
   contents: read
