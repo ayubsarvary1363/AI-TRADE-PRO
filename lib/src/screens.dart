@@ -6,6 +6,7 @@ import 'exchange_router.dart';
 import 'market_hub.dart';
 import 'provider_setup.dart';
 import 'trading_controller.dart';
+import 'background_trading_service.dart';
 
 // =====================================================
 // AI TRADE PRO
@@ -20,7 +21,7 @@ class HomeScreen extends StatefulWidget {
 }
 
 class _HomeScreenState extends State<HomeScreen> {
-  late final TradingController _controller;
+  late final BackgroundTradingController _controller;
 
   int _selectedTab = 0;
 
@@ -28,11 +29,7 @@ class _HomeScreenState extends State<HomeScreen> {
   void initState() {
     super.initState();
 
-    final registry = ProviderSetup.createRegistry();
-
-    final hub = MarketHub(registry: registry);
-
-    _controller = TradingController(marketHub: hub);
+    _controller = BackgroundTradingController();
   }
 
   @override
@@ -578,6 +575,7 @@ class _HomeScreenState extends State<HomeScreen> {
       child: Column(
         children: fills.map((fill) {
           final isBuy = fill.side == SignalDirection.buy;
+          final currentPrice = _controller.priceFor(fill.symbol);
 
           return ListTile(
             leading: Icon(
@@ -587,9 +585,26 @@ class _HomeScreenState extends State<HomeScreen> {
             title: Text(
               '${isBuy ? 'خرید' : 'فروش'} ${fill.symbol}',
             ),
-            subtitle: Text(
-              '${fill.quantity.toStringAsFixed(6)} واحد • '
-              '${fill.time.toLocal()}',
+            subtitle: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  '${fill.quantity.toStringAsFixed(6)} واحد • '
+                  '${fill.time.toLocal()}',
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  currentPrice == null
+                      ? 'قیمت فعلی در دسترس نیست'
+                      : 'قیمت فعلی: ${currentPrice.toStringAsFixed(6)}',
+                  style: TextStyle(
+                    fontSize: 12,
+                    color: currentPrice == null
+                        ? Colors.orangeAccent
+                        : Colors.lightBlueAccent,
+                  ),
+                ),
+              ],
             ),
             trailing: Text(
               '${fill.price.toStringAsFixed(4)}',
