@@ -40,26 +40,38 @@ class BackgroundTradingService {
     FlutterForegroundTask.setTaskHandler(_TradingTaskHandler());
   }
 
+  static bool _starting = false;
+
   static Future<void> start() async {
-    final permission = await FlutterForegroundTask.checkNotificationPermission();
-    if (permission != NotificationPermission.granted) {
-      await FlutterForegroundTask.requestNotificationPermission();
+    if (_starting) return;
+    _starting = true;
+    try {
+      final permission = await FlutterForegroundTask.checkNotificationPermission();
+      if (permission != NotificationPermission.granted) {
+        await FlutterForegroundTask.requestNotificationPermission();
+      }
+      if (await FlutterForegroundTask.isRunningService) {
+        FlutterForegroundTask.sendDataToTask(jsonEncode({'type': 'start'}));
+        return;
+      }
+
+      // Starting a new foreground service triggers onStart, which starts
+      // the engine after restoring its saved account. Do not send an IPC
+      // command immediately after startService: it can arrive before the
+      // task isolate has registered its handler and be silently lost.
+      await FlutterForegroundTask.startService(
+        serviceId: 731,
+        notificationTitle: 'AI Trade Pro',
+        notificationText: 'ربات آزمایشی در حال اجراست',
+        notificationButtons: const [
+          NotificationButton(id: 'stop', text: 'توقف ربات'),
+        ],
+        notificationInitialRoute: '/',
+        callback: startCallback,
+      );
+    } finally {
+      _starting = false;
     }
-    if (await FlutterForegroundTask.isRunningService) {
-      FlutterForegroundTask.sendDataToTask(jsonEncode({'type': 'start'}));
-      return;
-    }
-    await FlutterForegroundTask.startService(
-      serviceId: 731,
-      notificationTitle: 'AI Trade Pro',
-      notificationText: 'ربات آزمایشی در حال اجراست',
-      notificationButtons: const [
-        NotificationButton(id: 'stop', text: 'توقف ربات'),
-      ],
-      notificationInitialRoute: '/',
-      callback: startCallback,
-    );
-    FlutterForegroundTask.sendDataToTask(jsonEncode({'type': 'start'}));
   }
 
   static void send(Map<String, dynamic> command) {
@@ -165,14 +177,11 @@ class _TradingTaskHandler extends TaskHandler {
     }
     engine.addListener(_publish);
     _publish();
-    if (saved is String && saved.isNotEmpty) {
-      try {
-        final decoded = jsonDecode(saved);
-        if (decoded is Map && decoded['wasRunning'] == true) {
-          await engine.start();
-        }
-      } catch (_) {}
-    }
+
+    // The service is only created in response to the user's Start action.
+    // Start the engine here, after restore and listener registration, so
+    // startup cannot depend on a race-prone first IPC message.
+    await engine.start();
     _publish();
   }
 
