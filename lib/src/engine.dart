@@ -490,6 +490,77 @@ class PaperPortfolio {
     return true;
   }
 
+  Map<String, dynamic> toJson() => {
+        'initialUsdt': initialUsdt,
+        'feeRate': feeRate,
+        'cashUsdt': cashUsdt,
+        'peakEquity': peakEquity,
+        'dayStartingEquity': dayStartingEquity,
+        'currentDay': _currentDay.toIso8601String(),
+        'positions': positions.values.map((p) => {
+          'symbol': p.symbol,
+          'quantity': p.quantity,
+          'averageEntryPrice': p.averageEntryPrice,
+        }).toList(),
+        'fills': fills.map((f) => {
+          'id': f.id,
+          'symbol': f.symbol,
+          'side': f.side.name,
+          'price': f.price,
+          'quantity': f.quantity,
+          'fee': f.fee,
+          'realizedPnl': f.realizedPnl,
+          'time': f.time.toIso8601String(),
+        }).toList(),
+      };
+
+  void restoreFromJson(Map<String, dynamic> data) {
+    cashUsdt = (data['cashUsdt'] as num?)?.toDouble() ?? initialUsdt;
+    peakEquity = (data['peakEquity'] as num?)?.toDouble() ?? initialUsdt;
+    dayStartingEquity =
+        (data['dayStartingEquity'] as num?)?.toDouble() ?? initialUsdt;
+    final day = data['currentDay'];
+    if (day is String) _currentDay = DateTime.tryParse(day) ?? DateTime.now();
+
+    positions.clear();
+    for (final raw in (data['positions'] as List? ?? const [])) {
+      if (raw is! Map) continue;
+      final item = Map<String, dynamic>.from(raw);
+      final symbol = item['symbol']?.toString() ?? '';
+      final quantity = (item['quantity'] as num?)?.toDouble() ?? 0;
+      final entry = (item['averageEntryPrice'] as num?)?.toDouble() ?? 0;
+      if (symbol.isNotEmpty && quantity > 0 && entry > 0) {
+        positions[symbol] = PaperPosition(
+          symbol: symbol,
+          quantity: quantity,
+          averageEntryPrice: entry,
+        );
+      }
+    }
+
+    fills.clear();
+    for (final raw in (data['fills'] as List? ?? const [])) {
+      if (raw is! Map) continue;
+      final item = Map<String, dynamic>.from(raw);
+      final sideName = item['side']?.toString() ?? 'hold';
+      final time = DateTime.tryParse(item['time']?.toString() ?? '');
+      if (time == null) continue;
+      fills.add(PaperFill(
+        id: item['id']?.toString() ?? time.microsecondsSinceEpoch.toString(),
+        symbol: item['symbol']?.toString() ?? '',
+        side: SignalDirection.values.firstWhere(
+          (value) => value.name == sideName,
+          orElse: () => SignalDirection.hold,
+        ),
+        price: (item['price'] as num?)?.toDouble() ?? 0,
+        quantity: (item['quantity'] as num?)?.toDouble() ?? 0,
+        fee: (item['fee'] as num?)?.toDouble() ?? 0,
+        realizedPnl: (item['realizedPnl'] as num?)?.toDouble() ?? 0,
+        time: time,
+      ));
+    }
+  }
+
   void reset() {
     cashUsdt = initialUsdt;
     peakEquity = initialUsdt;
