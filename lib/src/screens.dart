@@ -578,6 +578,7 @@ class _HomeScreenState extends State<HomeScreen> {
       child: Column(
         children: fills.map((fill) {
           final isBuy = fill.side == SignalDirection.buy;
+          final currentPrice = _controller.priceFor(fill.symbol);
 
           return ListTile(
             leading: Icon(
@@ -587,9 +588,26 @@ class _HomeScreenState extends State<HomeScreen> {
             title: Text(
               '${isBuy ? 'خرید' : 'فروش'} ${fill.symbol}',
             ),
-            subtitle: Text(
-              '${fill.quantity.toStringAsFixed(6)} واحد • '
-              '${fill.time.toLocal()}',
+            subtitle: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  '${fill.quantity.toStringAsFixed(6)} واحد • '
+                  '${fill.time.toLocal()}',
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  currentPrice == null
+                      ? 'قیمت فعلی در دسترس نیست'
+                      : 'قیمت فعلی: ${currentPrice.toStringAsFixed(6)}',
+                  style: TextStyle(
+                    fontSize: 12,
+                    color: currentPrice == null
+                        ? Colors.orangeAccent
+                        : Colors.lightBlueAccent,
+                  ),
+                ),
+              ],
             ),
             trailing: Text(
               '${fill.price.toStringAsFixed(4)}',
