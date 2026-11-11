@@ -13,6 +13,7 @@ dependencies:
   # ارتباط امن با سرویس‌ها و APIها
   http: ^1.2.2
   web_socket_channel: ^3.0.1
+  flutter_background_service: ^5.0.10
 
   # نگهداری امن اطلاعات حساس و تنظیمات
   flutter_secure_storage: ^9.2.2
