@@ -41,6 +41,10 @@ class BackgroundTradingService {
   }
 
   static Future<void> start() async {
+    final permission = await FlutterForegroundTask.checkNotificationPermission();
+    if (permission != NotificationPermission.granted) {
+      await FlutterForegroundTask.requestNotificationPermission();
+    }
     if (await FlutterForegroundTask.isRunningService) {
       FlutterForegroundTask.sendDataToTask(jsonEncode({'type': 'start'}));
       return;
