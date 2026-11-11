@@ -1,5 +1,6 @@
 
 name: Build AI Trade Pro APK
+# Rebuild on every fix to the background trading service.
 
 on:
   workflow_dispatch:
