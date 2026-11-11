@@ -51,7 +51,7 @@ jobs:
           s = p.read_text().replace('compileSdk = flutter.compileSdkVersion', 'compileSdk = 35').replace('ndkVersion = flutter.ndkVersion', 'ndkVersion = "25.1.8937393"')
           p.write_text(s)
           p = Path('android/gradle/wrapper/gradle-wrapper.properties')
-          s = p.read_text().replace('gradle-8.7-all.zip', 'gradle-8.7-all.zip').replace('gradle-8.7-bin.zip', 'gradle-8.7-bin.zip')
+          s = p.read_text().replace('gradle-8.3-all.zip', 'gradle-8.7-all.zip').replace('gradle-8.3-bin.zip', 'gradle-8.7-bin.zip')
           p.write_text(s)
           p = Path('android/app/src/main/AndroidManifest.xml')
           s = p.read_text()
