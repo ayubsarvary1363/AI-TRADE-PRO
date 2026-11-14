@@ -17,7 +17,7 @@ Future<void> initializeBackgroundTradingService() async {
       autoStartOnBoot: false,
       isForegroundMode: true,
       notificationChannelId: 'ai_trade_pro_trading',
-      initialNotificationTitle: 'AI Trade Pro',
+      initialNotificationTitle: 'RISE S TRADE',
       initialNotificationContent: 'سرویس معاملات آزمایشی فعال است',
       foregroundServiceNotificationId: 7411,
     ),
@@ -46,7 +46,7 @@ void backgroundTradingEntrypoint(ServiceInstance service) async {
   if (service is AndroidServiceInstance) {
     service.setAsForegroundService();
     service.setForegroundNotificationInfo(
-      title: 'AI Trade Pro',
+      title: 'RISE S TRADE',
       content: 'موتور معاملات آزمایشی در پس‌زمینه فعال است',
     );
   }
