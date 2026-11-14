@@ -142,6 +142,8 @@ class _HomeScreenState extends State<HomeScreen> {
       padding: const EdgeInsets.all(16),
       children: [
         _statusCard(),
+        const SizedBox(height: 10),
+        _scanDiagnosticsCard(),
         const SizedBox(height: 14),
 
         Row(
@@ -302,6 +304,30 @@ class _HomeScreenState extends State<HomeScreen> {
                 ),
               ),
             ],
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _scanDiagnosticsCard() {
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(14),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text('گزارش اسکن خودکار بازار',
+                style: TextStyle(fontWeight: FontWeight.bold)),
+            const SizedBox(height: 8),
+            Text('بررسی‌شده: ${_controller.scannedMarketCount} از ${MarketSymbols.crypto.length} نماد'),
+            Text('سیگنال خرید: ${_controller.buySignalCount} | فروش: ${_controller.sellSignalCount} | انتظار: ${_controller.holdSignalCount}'),
+            Text('خرید ثبت‌شده: ${_controller.executedBuyCount} | فروش ثبت‌شده: ${_controller.executedSellCount}'),
+            Text('خطای قیمت: ${_controller.quoteFailureCount} | خطای کندل: ${_controller.candleFailureCount}'),
+            Text('اطمینان پایین: ${_controller.lowConfidenceCount} | محدودیت موجودی/حجم: ${_controller.insufficientFundsCount}'),
+            const SizedBox(height: 6),
+            Text('آخرین دلیل: ${_controller.lastScanReason}',
+                style: const TextStyle(color: Colors.orangeAccent, fontSize: 12)),
           ],
         ),
       ),
