@@ -8,8 +8,10 @@ import 'provider_setup.dart';
 import 'trading_controller.dart';
 
 final FlutterBackgroundService _backgroundService = FlutterBackgroundService();
+bool _serviceConfigured = false;
 
 Future<void> initializeBackgroundTradingService() async {
+  if (_serviceConfigured) return;
   await _backgroundService.configure(
     androidConfiguration: AndroidConfiguration(
       onStart: backgroundTradingEntrypoint,
@@ -27,9 +29,11 @@ Future<void> initializeBackgroundTradingService() async {
       onBackground: iosBackgroundEntrypoint,
     ),
   );
+  _serviceConfigured = true;
 }
 
 Future<void> startBackgroundTradingService() async {
+  await initializeBackgroundTradingService();
   await _backgroundService.startService();
 }
 
