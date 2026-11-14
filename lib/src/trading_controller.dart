@@ -8,6 +8,7 @@ import 'exchange_router.dart';
 import 'market_hub.dart';
 import 'market_provider.dart';
 import 'portfolio_persistence.dart';
+import 'market_news_service.dart';
 
 // =====================================================
 // AI TRADE PRO
@@ -24,6 +25,8 @@ class TradingController extends ChangeNotifier {
 
   final RiskManager riskManager = RiskManager();
   final SignalEngine signalEngine = SignalEngine();
+  final MarketNewsService newsService = MarketNewsService();
+  final List<String> newsHeadlines = [];
 
   TradingStyle style = TradingStyle.mediumTerm;
 
@@ -33,6 +36,8 @@ class TradingController extends ChangeNotifier {
 
   Timer? _quoteTimer;
   Timer? _candleTimer;
+  Timer? _newsTimer;
+  DateTime? _lastNewsFetch;
   Future<void> _saveQueue = Future<void>.value();
 
   bool _running = false;
@@ -205,6 +210,12 @@ class TradingController extends ChangeNotifier {
 
     if (!_running || _disposed) return;
 
+    unawaited(refreshNews());
+    _newsTimer = Timer.periodic(
+      const Duration(minutes: 15),
+      (_) => refreshNews(),
+    );
+
     _quoteTimer = Timer.periodic(
       const Duration(seconds: 2),
       (_) => refreshQuote(),
@@ -223,9 +234,11 @@ class TradingController extends ChangeNotifier {
 
     _quoteTimer?.cancel();
     _candleTimer?.cancel();
+    _newsTimer?.cancel();
 
     _quoteTimer = null;
     _candleTimer = null;
+    _newsTimer = null;
 
     status = 'ربات آزمایشی متوقف شد';
     unawaited(_savePortfolio());
@@ -333,6 +346,7 @@ class TradingController extends ChangeNotifier {
       latestSignal = signalEngine.analyze(
         candles,
         style: style,
+        newsHeadlines: newsHeadlines,
       );
 
       _updateErrorStatus();
@@ -354,6 +368,35 @@ class TradingController extends ChangeNotifier {
       _refreshingCandles = false;
 
       if (!_disposed) notifyListeners();
+    }
+  }
+
+  Future<void> refreshNews() async {
+    if (_disposed) return;
+    try {
+      final headlines = await newsService.fetchHeadlines(
+        market: market,
+        symbol: symbol,
+      );
+      if (_disposed) return;
+      newsHeadlines
+        ..clear()
+        ..addAll(headlines);
+      _lastNewsFetch = DateTime.now();
+      if (candles.length >= 50) {
+        latestSignal = signalEngine.analyze(
+          candles,
+          style: style,
+          newsHeadlines: newsHeadlines,
+        );
+      }
+      if (!_disposed) notifyListeners();
+    } catch (error) {
+      // News is optional: a feed outage must never block price or candle data.
+      if (!_disposed) {
+        marketHub.providerErrors['news'] = error.toString();
+        notifyListeners();
+      }
     }
   }
 
@@ -620,6 +663,7 @@ class TradingController extends ChangeNotifier {
     if (_running) {
       refreshMarket();
     }
+    unawaited(refreshNews());
   }
 
   void changeInterval(String value) {
@@ -699,7 +743,9 @@ class TradingController extends ChangeNotifier {
 
     _quoteTimer?.cancel();
     _candleTimer?.cancel();
+    _newsTimer?.cancel();
 
+    newsService.dispose();
     unawaited(marketHub.dispose());
 
     super.dispose();
