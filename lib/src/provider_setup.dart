@@ -3,6 +3,7 @@ import 'exchange_router.dart';
 import 'market_provider.dart';
 import 'kraken_provider.dart';
 import 'coinbase_provider.dart';
+import 'yahoo_forex_provider.dart';
 
 class ProviderSetup {
   ProviderSetup._();
@@ -13,16 +14,18 @@ class ProviderSetup {
     // تأمین‌کنندگان عمومی داده بازار رمزارز
     registry.register(KrakenProvider());
     registry.register(CoinbaseProvider());
+    // قیمت و کندل فارکس از فید عمومی Yahoo؛ داده ممکن است تأخیری باشد.
+    registry.register(YahooForexProvider());
 
     return registry;
   }
 
   static List<MarketType> get supportedMarkets => [
         MarketType.crypto,
+        MarketType.forex,
       ];
 
   static List<MarketType> get plannedMarkets => [
-        MarketType.forex,
         MarketType.stocks,
         MarketType.commodities,
         MarketType.indices,
@@ -43,5 +46,6 @@ class ProviderSetup {
   static List<String> get activeProviderNames => [
         'Kraken',
         'Coinbase',
+        'Yahoo Finance FX (indicative)',
       ];
 }
