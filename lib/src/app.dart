@@ -8,7 +8,7 @@ class AiTradeProApp extends StatelessWidget {
   Widget build(BuildContext context) {
     const seed = Color(0xFF16A36A);
     return MaterialApp(
-      title: 'AI Trade Pro',
+      title: 'RISE S TRADE',
       debugShowCheckedModeBanner: false,
       theme: ThemeData(
         useMaterial3: true,
