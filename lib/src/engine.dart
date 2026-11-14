@@ -74,139 +74,188 @@ class TradeSignal {
 class SignalEngine {
   double _ema(List<double> values, int period) {
     if (values.length < period) return 0;
-
     final multiplier = 2 / (period + 1);
     double result = values.take(period).reduce((a, b) => a + b) / period;
-
     for (final value in values.skip(period)) {
       result = (value - result) * multiplier + result;
     }
-
     return result;
   }
 
   double _rsi(List<double> values, int period) {
     if (values.length <= period) return 50;
-
-    double gains = 0;
-    double losses = 0;
-
+    double gains = 0, losses = 0;
     for (int i = values.length - period; i < values.length; i++) {
       final change = values[i] - values[i - 1];
-
-      if (change > 0) {
-        gains += change;
-      } else {
-        losses += change.abs();
-      }
+      if (change > 0) { gains += change; } else { losses += change.abs(); }
     }
-
     if (losses == 0) return 100;
-
-    final averageGain = gains / period;
-    final averageLoss = losses / period;
-    final rs = averageGain / averageLoss;
-
+    if (gains == 0) return 0;
+    final rs = (gains / period) / (losses / period);
     return 100 - (100 / (1 + rs));
   }
+
+  double _average(List<double> values) =>
+      values.isEmpty ? 0 : values.reduce((a, b) => a + b) / values.length;
 
   TradeSignal analyze(
     List<Candle> candles, {
     TradingStyle style = TradingStyle.mediumTerm,
   }) {
-    final valid = candles.where((c) => c.isValid).toList()
+    final data = candles.where((c) => c.isValid).toList()
       ..sort((a, b) => a.time.compareTo(b.time));
-
-    if (valid.length < 30) {
+    if (data.length < 50) {
       return TradeSignal(
         direction: SignalDirection.hold,
         confidence: 0,
-        price: valid.isEmpty ? 0 : valid.last.close,
-        reasons: ['داده کافی برای تحلیل وجود ندارد'],
+        price: data.isEmpty ? 0 : data.last.close,
+        reasons: ['برای تحلیل چندلایه حداقل ۵۰ کندل معتبر لازم است'],
         createdAt: DateTime.now(),
       );
     }
 
-    final prices = valid.map((c) => c.close).toList();
-
-    final ema9 = _ema(prices, 9);
-    final ema21 = _ema(prices, 21);
-    final ema26 = _ema(prices, 26);
-    final ema12 = _ema(prices, 12);
-    final rsi = _rsi(prices, 14);
-
+    final closes = data.map((c) => c.close).toList();
+    final last = data.last;
+    final prev = data[data.length - 2];
+    final ema9 = _ema(closes, 9);
+    final ema21 = _ema(closes, 21);
+    final ema50 = _ema(closes, 50);
+    final ema200 = closes.length >= 200 ? _ema(closes, 200) : ema50;
+    final ema12 = _ema(closes, 12);
+    final ema26 = _ema(closes, 26);
+    final previousCloses = closes.sublist(0, closes.length - 1);
     final macd = ema12 - ema26;
-    final previousMacd = _ema(prices.sublist(0, prices.length - 1), 12) -
-        _ema(prices.sublist(0, prices.length - 1), 26);
+    final previousMacd = _ema(previousCloses, 12) - _ema(previousCloses, 26);
+    final rsi = _rsi(closes, 14);
 
-    final last = valid.last;
-    final previous = valid[valid.length - 2];
+    final recent = data.sublist(data.length - 20, data.length - 1);
+    final resistance = recent.map((c) => c.high).reduce(max);
+    final support = recent.map((c) => c.low).reduce(min);
+    final averageVolume = _average(data.skip(data.length - 21).take(20).map((c) => c.volume).toList());
+    final volumeConfirmed = averageVolume <= 0 || last.volume >= averageVolume * 1.15;
 
     int score = 0;
     final reasons = <String>[];
 
-    if (ema9 > ema21) {
-      score++;
-      reasons.add('روند کوتاه‌مدت صعودی است');
-    } else if (ema9 < ema21) {
-      score--;
-      reasons.add('روند کوتاه‌مدت نزولی است');
+    // Trend stack: EMA alignment and price position.
+    if (ema9 > ema21 && ema21 > ema50) {
+      score += 2;
+      reasons.add('چیدمان EMA9/21/50 روند صعودی چندمرحله‌ای را تأیید می‌کند');
+    } else if (ema9 < ema21 && ema21 < ema50) {
+      score -= 2;
+      reasons.add('چیدمان EMA9/21/50 روند نزولی چندمرحله‌ای را تأیید می‌کند');
+    } else {
+      reasons.add('میانگین‌های متحرک هم‌جهت نیستند؛ روند نیازمند تأیید است');
     }
-
-    if (last.close > ema21) {
+    if (last.close > ema200) {
       score++;
-      reasons.add('قیمت بالاتر از میانگین ۲۱ دوره است');
+      reasons.add('قیمت بالاتر از EMA200 است');
     } else {
       score--;
-      reasons.add('قیمت پایین‌تر از میانگین ۲۱ دوره است');
+      reasons.add('قیمت پایین‌تر از EMA200 است');
     }
 
-    if (macd > previousMacd) {
+    // MACD momentum and RSI regime.
+    if (macd > previousMacd && macd > 0) {
       score++;
-      reasons.add('مومنتوم MACD در حال تقویت است');
-    } else {
+      reasons.add('مومنتوم MACD صعودی و در حال تقویت است');
+    } else if (macd < previousMacd && macd < 0) {
       score--;
-      reasons.add('مومنتوم MACD در حال تضعیف است');
+      reasons.add('مومنتوم MACD نزولی و در حال تضعیف است');
     }
-
-    if (rsi >= 50 && rsi < 70) {
+    if (rsi >= 52 && rsi < 70) {
       score++;
-      reasons.add('RSI وضعیت صعودی متعادل دارد');
-    } else if (rsi < 50 && rsi > 30) {
+      reasons.add('RSI از مومنتوم مثبت بدون اشباع شدید حمایت می‌کند');
+    } else if (rsi <= 48 && rsi > 30) {
       score--;
-      reasons.add('RSI وضعیت نزولی دارد');
+      reasons.add('RSI مومنتوم منفی را نشان می‌دهد');
     } else if (rsi >= 70) {
-      reasons.add('RSI در محدوده اشباع خرید است');
-    } else {
-      reasons.add('RSI در محدوده اشباع فروش است');
+      reasons.add('RSI در اشباع خرید است؛ از تعقیب قیمت پرهیز شود');
+    } else if (rsi <= 30) {
+      reasons.add('RSI در اشباع فروش است؛ احتمال برگشت نیازمند تأیید است');
     }
 
-    if (last.close > previous.close) {
+    // Price action: engulfing, hammer and shooting-star approximations.
+    final body = (last.close - last.open).abs();
+    final range = max(last.high - last.low, 0.000000001);
+    final lowerWick = min(last.open, last.close) - last.low;
+    final upperWick = last.high - max(last.open, last.close);
+    final bullishEngulfing = prev.close < prev.open &&
+        last.close > last.open && last.open <= prev.close && last.close >= prev.open;
+    final bearishEngulfing = prev.close > prev.open &&
+        last.close < last.open && last.open >= prev.close && last.close <= prev.open;
+    final hammer = lowerWick >= body * 2 && upperWick <= body && last.close > last.open;
+    final shootingStar = upperWick >= body * 2 && lowerWick <= body && last.close < last.open;
+    if (bullishEngulfing || hammer) {
       score++;
-      reasons.add('آخرین کندل نسبت به کندل قبل صعودی است');
-    } else if (last.close < previous.close) {
+      reasons.add(bullishEngulfing ? 'الگوی کندلی پوشای صعودی شناسایی شد' : 'الگوی چکش صعودی شناسایی شد');
+    }
+    if (bearishEngulfing || shootingStar) {
       score--;
-      reasons.add('آخرین کندل نسبت به کندل قبل نزولی است');
+      reasons.add(bearishEngulfing ? 'الگوی کندلی پوشای نزولی شناسایی شد' : 'الگوی ستاره ثاقب نزولی شناسایی شد');
+    }
+    if (body / range < 0.1) {
+      reasons.add('کندل دوجی و تردید بازار مشاهده شد');
+    }
+
+    // Support/resistance breakout and volume confirmation.
+    if (last.close > resistance && volumeConfirmed) {
+      score += 2;
+      reasons.add('شکست مقاومت ۲۰ کندل اخیر با تأیید حجم رخ داده است');
+    } else if (last.close < support && volumeConfirmed) {
+      score -= 2;
+      reasons.add('شکست حمایت ۲۰ کندل اخیر با تأیید حجم رخ داده است');
+    } else if ((last.close - support).abs() / last.close < 0.003) {
+      reasons.add('قیمت نزدیک ناحیه حمایت اخیر است');
+    } else if ((resistance - last.close).abs() / last.close < 0.003) {
+      reasons.add('قیمت نزدیک ناحیه مقاومت اخیر است');
+    }
+    if (averageVolume > 0 && !volumeConfirmed) {
+      reasons.add('حجم معاملات شکست یا حرکت اخیر را تأیید نمی‌کند');
+    }
+
+    // Simple double-top / double-bottom detection from recent swing points.
+    final pivotsHigh = <double>[];
+    final pivotsLow = <double>[];
+    for (int i = max(1, data.length - 35); i < data.length - 1; i++) {
+      if (data[i].high >= data[i - 1].high && data[i].high >= data[i + 1].high) {
+        pivotsHigh.add(data[i].high);
+      }
+      if (data[i].low <= data[i - 1].low && data[i].low <= data[i + 1].low) {
+        pivotsLow.add(data[i].low);
+      }
+    }
+    if (pivotsHigh.length >= 2) {
+      final x = pivotsHigh[pivotsHigh.length - 1];
+      final y = pivotsHigh[pivotsHigh.length - 2];
+      if ((x - y).abs() / max(x, y) < 0.004 && last.close < min(x, y)) {
+        score--;
+        reasons.add('احتمال سقف دوقلو در ناحیه مقاومت دیده می‌شود');
+      }
+    }
+    if (pivotsLow.length >= 2) {
+      final x = pivotsLow[pivotsLow.length - 1];
+      final y = pivotsLow[pivotsLow.length - 2];
+      if ((x - y).abs() / max(x, y) < 0.004 && last.close > max(x, y)) {
+        score++;
+        reasons.add('احتمال کف دوقلو در ناحیه حمایت دیده می‌شود');
+      }
     }
 
     final threshold = switch (style) {
-      TradingStyle.fast => 2,
-      TradingStyle.mediumTerm => 3,
-      TradingStyle.longTerm => 4,
+      TradingStyle.fast => 3,
+      TradingStyle.mediumTerm => 4,
+      TradingStyle.longTerm => 5,
     };
-
     SignalDirection direction = SignalDirection.hold;
-
     if (score >= threshold) {
       direction = SignalDirection.buy;
     } else if (score <= -threshold) {
       direction = SignalDirection.sell;
     }
-
     final confidence = direction == SignalDirection.hold
         ? 0.0
-        : min(0.95, 0.50 + (score.abs() * 0.07));
-
+        : min(0.95, 0.50 + (score.abs() * 0.045));
     return TradeSignal(
       direction: direction,
       confidence: confidence,
