@@ -1,17 +1,18 @@
+import 'dart:async';
 import 'dart:ui';
 
 import 'package:flutter/widgets.dart';
 import 'package:flutter_background_service/flutter_background_service.dart';
 
-import 'market_hub.dart';
-import 'provider_setup.dart';
-import 'trading_controller.dart';
-
 final FlutterBackgroundService _backgroundService = FlutterBackgroundService();
 bool _serviceConfigured = false;
 
+/// Configures a foreground keep-alive service. The trading controller lives
+/// only in the main Flutter isolate; creating another controller here would
+/// start a second independent trading engine and corrupt the demo state.
 Future<void> initializeBackgroundTradingService() async {
   if (_serviceConfigured) return;
+
   await _backgroundService.configure(
     androidConfiguration: AndroidConfiguration(
       onStart: backgroundTradingEntrypoint,
@@ -20,7 +21,7 @@ Future<void> initializeBackgroundTradingService() async {
       isForegroundMode: true,
       notificationChannelId: 'rise_s_trade_trading',
       initialNotificationTitle: 'RISE S TRADE',
-      initialNotificationContent: 'سرویس معاملات آزمایشی فعال است',
+      initialNotificationContent: 'موتور معاملات آزمایشی فعال است',
       foregroundServiceNotificationId: 7411,
     ),
     iosConfiguration: IosConfiguration(
@@ -29,44 +30,47 @@ Future<void> initializeBackgroundTradingService() async {
       onBackground: iosBackgroundEntrypoint,
     ),
   );
+
   _serviceConfigured = true;
 }
 
 Future<void> startBackgroundTradingService() async {
   await initializeBackgroundTradingService();
-  await _backgroundService.startService();
+
+  final started = await _backgroundService.startService();
+  if (!started) {
+    throw StateError('سرویس پس‌زمینه توسط اندروید راه‌اندازی نشد');
+  }
 }
 
 Future<void> stopBackgroundTradingService() async {
-  _backgroundService.invoke('stopTrading');
-  await Future<void>.delayed(const Duration(milliseconds: 300));
   _backgroundService.invoke('stopService');
+  await Future<void>.delayed(const Duration(milliseconds: 500));
 }
 
 @pragma('vm:entry-point')
 void backgroundTradingEntrypoint(ServiceInstance service) async {
+  WidgetsFlutterBinding.ensureInitialized();
   DartPluginRegistrant.ensureInitialized();
 
   if (service is AndroidServiceInstance) {
-    service.setAsForegroundService();
-    service.setForegroundNotificationInfo(
+    await service.setAsForegroundService();
+    await service.setForegroundNotificationInfo(
       title: 'RISE S TRADE',
-      content: 'موتور معاملات آزمایشی در پس‌زمینه فعال است',
+      content: 'سرویس نگهدارنده اجرای برنامه فعال است',
     );
   }
 
-  final marketHub = MarketHub(registry: ProviderSetup.createRegistry());
-  final controller = TradingController(marketHub: marketHub);
-  await controller.start();
-
-  service.on('stopTrading').listen((_) {
-    controller.stop();
+  // IMPORTANT: Do not create TradingController/MarketHub in this isolate.
+  // The main isolate owns the single controller and the single paper portfolio.
+  service.on('stopService').listen((_) async {
+    service.stopSelf();
   });
 
-  service.on('stopService').listen((_) async {
-    controller.stop();
-    await marketHub.dispose();
-    service.stopSelf();
+  service.on('stopTrading').listen((_) async {
+    if (service is AndroidServiceInstance) {
+      await service.setAsBackgroundService();
+    }
   });
 }
 
