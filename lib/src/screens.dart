@@ -1,7 +1,7 @@
 
 import 'package:flutter/material.dart';
 import 'dart:math';
-import 'background_trading_service.dart';
+
 import 'engine.dart';
 import 'exchange_router.dart';
 import 'market_hub.dart';
@@ -115,18 +115,16 @@ class _HomeScreenState extends State<HomeScreen> {
     });
     try {
       if (enabled) {
-        // Start the Android foreground service first so startup failures
-        // are reported instead of leaving a misleading active switch.
-        await startBackgroundTradingService();
+        // Run one trading controller only. Starting a second controller
+        // in the background service created duplicate engines/portfolios
+        // and could crash the app during startup.
         await _controller.start();
       } else {
         _controller.stop();
-        await stopBackgroundTradingService();
       }
     } catch (error) {
       _controller.stop();
-      try { await stopBackgroundTradingService(); } catch (_) {}
-      _serviceError = 'راه‌اندازی سرویس پس‌زمینه ناموفق بود: $error';
+      _serviceError = 'راه‌اندازی موتور معاملات ناموفق بود: $error';
     } finally {
       if (mounted) setState(() => _startingBot = false);
     }
