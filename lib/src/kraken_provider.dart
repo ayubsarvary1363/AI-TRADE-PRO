@@ -319,7 +319,7 @@ class KrakenProvider implements MarketProvider, CandleMarketProvider {
       return quote;
     } catch (e) {
       lastError = e.toString();
-      return null;
+      rethrow;
     }
   }
 
