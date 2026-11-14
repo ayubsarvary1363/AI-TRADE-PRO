@@ -33,6 +33,7 @@ class _HomeScreenState extends State<HomeScreen> {
     final hub = MarketHub(registry: registry);
 
     _controller = TradingController(marketHub: hub);
+    _controller.initialize();
   }
 
   @override
@@ -49,7 +50,7 @@ class _HomeScreenState extends State<HomeScreen> {
         return Scaffold(
           appBar: AppBar(
             title: const Text(
-              'AI Trade Pro',
+              'RISE S TRADE',
               style: TextStyle(fontWeight: FontWeight.bold),
             ),
             actions: [
