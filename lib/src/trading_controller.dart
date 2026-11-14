@@ -7,6 +7,7 @@ import 'engine.dart';
 import 'exchange_router.dart';
 import 'market_hub.dart';
 import 'market_provider.dart';
+import 'portfolio_persistence.dart';
 
 // =====================================================
 // AI TRADE PRO
@@ -70,6 +71,24 @@ class TradingController extends ChangeNotifier {
   });
 
   bool get isRunning => _running;
+
+  Future<void> initialize() async {
+    final restored = await PortfolioPersistence.restore(portfolio);
+    if (_disposed) return;
+    status = restored
+        ? 'اطلاعات حساب آزمایشی بازیابی شد'
+        : 'حساب آزمایشی آماده است';
+    notifyListeners();
+  }
+
+  Future<void> _savePortfolio() async {
+    try {
+      await PortfolioPersistence.save(portfolio);
+    } catch (error) {
+      lastError = 'ذخیره حساب آزمایشی ناموفق بود: $error';
+      if (!_disposed) notifyListeners();
+    }
+  }
 
   bool get isRefreshing =>
       _refreshingQuote || _refreshingCandles;
@@ -399,6 +418,7 @@ class TradingController extends ChangeNotifier {
       quantity: quantity,
     );
 
+    if (success) unawaited(_savePortfolio());
     status = success
         ? 'خرید آزمایشی ثبت شد'
         : 'موجودی برای خرید کافی نیست';
@@ -430,6 +450,7 @@ class TradingController extends ChangeNotifier {
       quantity: position.quantity,
     );
 
+    if (success) unawaited(_savePortfolio());
     status = success
         ? 'فروش آزمایشی ثبت شد'
         : 'ثبت فروش ناموفق بود';
@@ -509,6 +530,7 @@ class TradingController extends ChangeNotifier {
     stop();
 
     portfolio.reset();
+    unawaited(_savePortfolio());
 
     latestQuote = null;
     latestSignal = null;
