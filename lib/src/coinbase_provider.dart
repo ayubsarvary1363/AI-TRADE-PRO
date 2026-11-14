@@ -28,7 +28,7 @@ class CoinbaseProvider implements MarketProvider, CandleMarketProvider {
 
   CoinbaseProvider({
     http.Client? client,
-    this.restUrl = 'https://api.coinbase.com',
+    this.restUrl = 'https://api.exchange.coinbase.com',
     this.wsUrl = 'wss://advanced-trade-ws.coinbase.com',
   }) : _client = client ?? http.Client();
 
@@ -72,9 +72,7 @@ class CoinbaseProvider implements MarketProvider, CandleMarketProvider {
 
     try {
       final response = await _client
-          .get(_uri('/api/v3/brokerage/market/products', {
-            'limit': '1',
-          }))
+          .get(_uri('/products'))
           .timeout(const Duration(seconds: 8));
 
       if (response.statusCode != 200) {
@@ -84,7 +82,7 @@ class CoinbaseProvider implements MarketProvider, CandleMarketProvider {
 
       final decoded = jsonDecode(response.body);
 
-      if (decoded is Map && decoded['products'] is List) {
+      if (decoded is List && decoded.isNotEmpty) {
         lastError = null;
         return true;
       }
@@ -215,61 +213,24 @@ class CoinbaseProvider implements MarketProvider, CandleMarketProvider {
 
   Future<MarketQuote?> _fetchRestQuote(String symbol) async {
     final product = _productId(symbol);
-
-    final response = await _client
-        .get(_uri('/api/v3/brokerage/market/product_book', {
-          'product_id': product,
-          'limit': '1',
-        }))
-        .timeout(const Duration(seconds: 8));
-
+    final response = await _client.get(_uri('/products/$product/ticker'))
+        .timeout(const Duration(seconds: 10));
     if (response.statusCode != 200) {
-      throw StateError(
-        'خطای دریافت قیمت Coinbase: HTTP ${response.statusCode}',
-      );
+      throw StateError('Coinbase ticker HTTP ${response.statusCode}: ${response.body}');
     }
-
     final decoded = jsonDecode(response.body);
-
-    if (decoded is! Map) {
-      throw StateError('پاسخ قیمت Coinbase معتبر نیست');
-    }
-
-    final book = decoded['pricebook'];
-
-    if (book is! Map) {
-      throw StateError('دفتر سفارش $product در Coinbase پیدا نشد');
-    }
-
-    final bids = book['bids'];
-    final asks = book['asks'];
-
-    if (bids is! List ||
-        asks is! List ||
-        bids.isEmpty ||
-        asks.isEmpty) {
-      return null;
-    }
-
-    final bestBid = bids.first;
-    final bestAsk = asks.first;
-
-    if (bestBid is! Map || bestAsk is! Map) return null;
-
-    final bid = _number(bestBid['price']);
-    final ask = _number(bestAsk['price']);
-
+    if (decoded is! Map) throw StateError('پاسخ قیمت Coinbase معتبر نیست');
     final quote = MarketQuote(
       providerId: id,
       symbol: symbol.toUpperCase(),
       market: MarketType.crypto,
-      bid: bid,
-      ask: ask,
-      volume: 0,
+      bid: _number(decoded['bid']),
+      ask: _number(decoded['ask']),
+      volume: _number(decoded['volume']),
       timestamp: DateTime.now(),
     );
-
-    return quote.isValid ? quote : null;
+    if (!quote.isValid) throw StateError('قیمت Coinbase برای $product معتبر نیست');
+    return quote;
   }
 
   @override
@@ -320,22 +281,9 @@ class CoinbaseProvider implements MarketProvider, CandleMarketProvider {
   // -------------------- CANDLES --------------------
 
   String _granularity(String interval) {
-    const values = {
-      '1m': 'ONE_MINUTE',
-      '5m': 'FIVE_MINUTE',
-      '15m': 'FIFTEEN_MINUTE',
-      '30m': 'THIRTY_MINUTE',
-      '1h': 'ONE_HOUR',
-      '4h': 'FOUR_HOUR',
-      '1d': 'ONE_DAY',
-    };
-
+    const values = {'1m':'60','5m':'300','15m':'900','30m':'1800','1h':'3600','4h':'21600','1d':'86400'};
     final result = values[interval];
-
-    if (result == null) {
-      throw ArgumentError('تایم‌فریم پشتیبانی نمی‌شود: $interval');
-    }
-
+    if (result == null) throw ArgumentError('تایم‌فریم پشتیبانی نمی‌شود: $interval');
     return result;
   }
 
@@ -360,80 +308,38 @@ class CoinbaseProvider implements MarketProvider, CandleMarketProvider {
   }
 
   @override
-  Future<List<Candle>> fetchCandles(
-    String symbol,
-    String interval, {
-    int limit = 200,
-  }) async {
+  Future<List<Candle>> fetchCandles(String symbol, String interval, {int limit = 200}) async {
     if (_closed || symbol.trim().isEmpty) return const [];
-
-    final safeLimit = limit.clamp(30, 350).toInt();
+    final safeLimit = limit.clamp(30, 300).toInt();
     final duration = _intervalDuration(interval);
-
     final end = DateTime.now().toUtc();
     final start = end.subtract(duration * safeLimit);
-
     final product = _productId(symbol);
-
-    final uri = _uri(
-      '/api/v3/brokerage/market/products/$product/candles',
-      {
-        'start': (start.millisecondsSinceEpoch ~/ 1000).toString(),
-        'end': (end.millisecondsSinceEpoch ~/ 1000).toString(),
-        'granularity': _granularity(interval),
-        'limit': safeLimit.toString(),
-      },
-    );
-
-    final response = await _client.get(uri).timeout(
-      const Duration(seconds: 12),
-    );
-
+    final response = await _client.get(_uri('/products/$product/candles', {
+      'start': start.toIso8601String(),
+      'end': end.toIso8601String(),
+      'granularity': _granularity(interval),
+    })).timeout(const Duration(seconds: 15));
     if (response.statusCode != 200) {
-      throw StateError(
-        'خطای دریافت کندل Coinbase: HTTP ${response.statusCode}',
-      );
+      throw StateError('Coinbase candles HTTP ${response.statusCode}: ${response.body}');
     }
-
     final decoded = jsonDecode(response.body);
-
-    if (decoded is! Map || decoded['candles'] is! List) {
-      throw StateError('پاسخ کندل Coinbase معتبر نیست');
-    }
-
-    final rows = decoded['candles'] as List;
+    if (decoded is! List) throw StateError('پاسخ کندل Coinbase معتبر نیست');
     final candles = <Candle>[];
-
-    for (final item in rows) {
-      if (item is! Map) continue;
-
-      final timestamp = _number(item['start']);
-
+    // Coinbase Exchange: [time, low, high, open, close, volume]
+    for (final row in decoded) {
+      if (row is! List || row.length < 6) continue;
+      final timestamp = _number(row[0]);
       if (timestamp <= 0) continue;
-
       final candle = Candle(
-        time: DateTime.fromMillisecondsSinceEpoch(
-          (timestamp * 1000).round(),
-          isUtc: true,
-        ),
-        open: _number(item['open']),
-        high: _number(item['high']),
-        low: _number(item['low']),
-        close: _number(item['close']),
-        volume: _number(item['volume']),
+        time: DateTime.fromMillisecondsSinceEpoch((timestamp * 1000).round(), isUtc: true),
+        low: _number(row[1]), high: _number(row[2]), open: _number(row[3]),
+        close: _number(row[4]), volume: _number(row[5]),
       );
-
-      if (candle.isValid) {
-        candles.add(candle);
-      }
+      if (candle.isValid) candles.add(candle);
     }
-
     candles.sort((a, b) => a.time.compareTo(b.time));
-
-    if (candles.length > safeLimit) {
-      return candles.sublist(candles.length - safeLimit);
-    }
-
+    if (candles.length > safeLimit) return candles.sublist(candles.length - safeLimit);
     return candles;
   }
 
