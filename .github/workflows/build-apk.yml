@@ -1,5 +1,5 @@
 
-name: Build RISE S TRADE APK
+name: Build RISE S TRADE APK (startup fix)
 
 on:
   workflow_dispatch:
