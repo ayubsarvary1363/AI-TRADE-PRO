@@ -37,7 +37,6 @@ class TradingController extends ChangeNotifier {
   Timer? _quoteTimer;
   Timer? _candleTimer;
   Timer? _newsTimer;
-  DateTime? _lastNewsFetch;
   Future<void> _saveQueue = Future<void>.value();
 
   bool _running = false;
@@ -382,7 +381,6 @@ class TradingController extends ChangeNotifier {
       newsHeadlines
         ..clear()
         ..addAll(headlines);
-      _lastNewsFetch = DateTime.now();
       if (candles.length >= 50) {
         latestSignal = signalEngine.analyze(
           candles,
@@ -624,6 +622,11 @@ class TradingController extends ChangeNotifier {
 
   void changeMarket(MarketType value) {
     if (_disposed || market == value) return;
+    if (portfolio.positions.isNotEmpty) {
+      status = 'برای تغییر بازار، ابتدا موقعیت باز را ببندید تا مدیریت حد ضرر قطع نشود';
+      notifyListeners();
+      return;
+    }
     market = value;
     changeSymbol(value == MarketType.forex ? 'EURUSD' : 'BTCUSDT');
     unawaited(_savePortfolio());
@@ -641,6 +644,12 @@ class TradingController extends ChangeNotifier {
     final nextSymbol = value.trim().toUpperCase();
 
     if (symbol == nextSymbol) return;
+    if (portfolio.positions.isNotEmpty) {
+      status = 'برای تغییر نماد، ابتدا موقعیت باز را ببندید تا حد ضرر آن از کنترل خارج نشود';
+      notifyListeners();
+      return;
+    }
+    newsHeadlines.clear();
 
     symbol = nextSymbol;
 
