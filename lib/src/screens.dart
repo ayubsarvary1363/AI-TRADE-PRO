@@ -116,18 +116,16 @@ class _HomeScreenState extends State<HomeScreen> {
     });
     try {
       if (enabled) {
-        // Start the Android foreground service first so startup failures
-        // are reported instead of leaving a misleading active switch.
-        await startBackgroundTradingService();
+        // Diagnostic build: isolate controller startup from Android service
+        // startup. Background execution is intentionally disabled here.
         await _controller.start();
       } else {
         _controller.stop();
-        await stopBackgroundTradingService();
       }
-    } catch (error) {
+    } catch (error, stackTrace) {
       _controller.stop();
-      try { await stopBackgroundTradingService(); } catch (_) {}
-      _serviceError = 'راه‌اندازی سرویس پس‌زمینه ناموفق بود: $error';
+      _serviceError = 'خطا هنگام شروع موتور معاملات: $error';
+      debugPrint('RISE S TRADE start failure: $error\n$stackTrace');
     } finally {
       if (mounted) setState(() => _startingBot = false);
     }
