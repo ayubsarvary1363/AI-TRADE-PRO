@@ -81,7 +81,7 @@ class TradingController extends ChangeNotifier {
 
   Future<void> _savePortfolio() async {
     try {
-      _saveQueue = _saveQueue.then((_) => PortfolioPersistence.save(portfolio));
+      _saveQueue = _saveQueue.catchError((_) {}).then((_) => PortfolioPersistence.save(portfolio));
       await _saveQueue;
     } catch (error) {
       lastError = 'ذخیره اطلاعات حساب ناموفق بود: $error';
@@ -187,6 +187,7 @@ class TradingController extends ChangeNotifier {
     _candleTimer = null;
 
     status = 'ربات آزمایشی متوقف شد';
+    unawaited(_savePortfolio());
 
     if (!_disposed) notifyListeners();
   }
