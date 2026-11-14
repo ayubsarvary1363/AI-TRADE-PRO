@@ -382,7 +382,9 @@ class _HomeScreenState extends State<HomeScreen> {
                   : CustomPaint(
                       painter: TradingChartPainter(
                         candles: candles,
-                        fills: _controller.portfolio.fills,
+                        fills: _controller.portfolio.fills
+                            .where((fill) => fill.symbol == _controller.symbol)
+                            .toList(),
                       ),
                       child: const SizedBox.expand(),
                     ),
