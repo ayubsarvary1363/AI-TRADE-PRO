@@ -1,9 +1,9 @@
 import 'package:flutter/material.dart';
 import 'src/app.dart';
-import 'src/background_trading_service.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
-  await initializeBackgroundTradingService();
+  // Do not initialize Android foreground-service plugins before the first frame.
+  // The service is configured lazily only when the user explicitly starts Demo.
   runApp(const AiTradeProApp());
 }
