@@ -101,6 +101,7 @@ class SignalEngine {
   TradeSignal analyze(
     List<Candle> candles, {
     TradingStyle style = TradingStyle.mediumTerm,
+    List<String> newsHeadlines = const [],
   }) {
     final data = candles.where((c) => c.isValid).toList()
       ..sort((a, b) => a.time.compareTo(b.time));
@@ -241,6 +242,33 @@ class SignalEngine {
         score++;
         reasons.add('احتمال کف دوقلو در ناحیه حمایت دیده می‌شود');
       }
+    }
+
+    // News is deliberately a low-weight context filter, not a standalone trigger.
+    final positiveNews = RegExp(
+      r'beats estimates|approval|approved|inflow|adoption|surge|rally|rate cut|easing|bullish|record high|partnership',
+      caseSensitive: false,
+    );
+    final negativeNews = RegExp(
+      r'hack|exploit|lawsuit|ban |banned|outflow|liquidation|crash|fraud|investigation|rate hike|war|sanction|bearish',
+      caseSensitive: false,
+    );
+    var positiveCount = 0;
+    var negativeCount = 0;
+    for (final headline in newsHeadlines) {
+      if (positiveNews.hasMatch(headline)) positiveCount++;
+      if (negativeNews.hasMatch(headline)) negativeCount++;
+    }
+    if (positiveCount > negativeCount && positiveCount > 0) {
+      score++;
+      reasons.add('تیترهای خبری اخیر گرایش مثبت دارند؛ این امتیاز وزن محدودی دارد');
+    } else if (negativeCount > positiveCount && negativeCount > 0) {
+      score--;
+      reasons.add('تیترهای خبری اخیر گرایش منفی دارند؛ ریسک رویداد افزایش یافته است');
+    } else if (newsHeadlines.isEmpty) {
+      reasons.add('داده خبری در دسترس نیست؛ تصمیم فقط بر پایه بازار است');
+    } else {
+      reasons.add('جهت تیترهای خبری یکدست نیست یا سیگنال مشخصی ندارد');
     }
 
     // Head-and-shoulders / inverse head-and-shoulders approximation.
