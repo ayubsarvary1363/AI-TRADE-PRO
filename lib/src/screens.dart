@@ -19,7 +19,7 @@ class HomeScreen extends StatefulWidget {
   State<HomeScreen> createState() => _HomeScreenState();
 }
 
-class _HomeScreenState extends State<HomeScreen> {
+class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   late final TradingController _controller;
 
   int _selectedTab = 0;
@@ -27,6 +27,7 @@ class _HomeScreenState extends State<HomeScreen> {
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
 
     final registry = ProviderSetup.createRegistry();
 
@@ -37,7 +38,18 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.inactive ||
+        state == AppLifecycleState.paused ||
+        state == AppLifecycleState.detached) {
+      _controller.persistNow();
+    }
+  }
+
+  @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    _controller.persistNow();
     _controller.dispose();
     super.dispose();
   }
@@ -456,57 +468,79 @@ class _HomeScreenState extends State<HomeScreen> {
   // -------------------- MARKETS --------------------
 
   Widget _markets() {
-    final symbols = [
-      'BTCUSDT',
-      'ETHUSDT',
-      'BNBUSDT',
-      'SOLUSDT',
-      'XRPUSDT',
-      'ADAUSDT',
-      'DOGEUSDT',
+    const cryptoSymbols = [
+      'BTCUSDT','ETHUSDT','BNBUSDT','SOLUSDT','XRPUSDT','ADAUSDT','DOGEUSDT',
+      'AVAXUSDT','LINKUSDT','DOTUSDT','LTCUSDT','BCHUSDT','TRXUSDT','TONUSDT',
+      'SHIBUSDT','XLMUSDT','ATOMUSDT','ETCUSDT','NEARUSDT','APTUSDT','ARBUSDT',
+      'OPUSDT','INJUSDT','SUIUSDT','FILUSDT','ICPUSDT','AAVEUSDT','UNIUSDT',
+      'MKRUSDT','CRVUSDT','ALGOUSDT','VETUSDT','HBARUSDT','EOSUSDT','FTMUSDT',
+      'RUNEUSDT','GRTUSDT','SANDUSDT','MANAUSDT','AXSUSDT','EGLDUSDT','THETAUSDT',
+      'FLOWUSDT','IMXUSDT','SEIUSDT','TIAUSDT','PEPEUSDT','WIFUSDT','BONKUSDT',
+      'FETUSDT','RENDERUSDT','JUPUSDT','PYTHUSDT','KASUSDT','ZECUSDT','XMRUSDT',
+      'DASHUSDT','XTZUSDT','NEOUSDT','IOTAUSDT','ZILUSDT','COMPUSDT','SNXUSDT',
+      '1INCHUSDT','ENJUSDT','CHZUSDT','BAT' 'USDT',
     ];
+    const forexSymbols = [
+      'EURUSD','GBPUSD','USDJPY','USDCHF','USDCAD','AUDUSD','NZDUSD',
+      'EURGBP','EURJPY','EURCHF','EURCAD','EURAUD','EURNZD','GBPJPY',
+      'GBPCHF','GBPCAD','GBPAUD','GBPNZD','AUDJPY','AUDCAD','AUDCHF',
+      'AUDNZD','CADJPY','CADCHF','CHFJPY','NZDJPY','NZDCAD','NZDCHF',
+      'USDSEK','USDNOK','USDMXN','USDZAR','USDSGD','USDHKD','USDCNH',
+    ];
+    final symbols = _controller.market == MarketType.forex
+        ? forexSymbols
+        : cryptoSymbols;
 
     return ListView(
       padding: const EdgeInsets.all(16),
       children: [
-        _sectionTitle('انتخاب نماد رمزارز'),
+        _sectionTitle('انتخاب بازار'),
+        Wrap(
+          spacing: 8,
+          children: [
+            ChoiceChip(
+              label: const Text('رمزارز'),
+              selected: _controller.market == MarketType.crypto,
+              onSelected: (_) => _controller.changeMarket(MarketType.crypto),
+            ),
+            ChoiceChip(
+              label: const Text('فارکس'),
+              selected: _controller.market == MarketType.forex,
+              onSelected: (_) => _controller.changeMarket(MarketType.forex),
+            ),
+          ],
+        ),
+        const SizedBox(height: 16),
+        _sectionTitle(_controller.market == MarketType.forex
+            ? 'جفت‌ارزهای فارکس'
+            : 'فهرست گسترده رمزارزها'),
         Card(
           child: Column(
-            children: symbols.map((symbol) {
+            children: symbols.map((item) {
               return ListTile(
-                title: Text(symbol),
-                trailing: _controller.symbol == symbol
-                    ? const Icon(
-                        Icons.check_circle,
-                        color: Colors.greenAccent,
-                      )
+                dense: true,
+                title: Text(item),
+                trailing: _controller.symbol == item
+                    ? const Icon(Icons.check_circle, color: Colors.greenAccent)
                     : null,
-                onTap: () => _controller.changeSymbol(symbol),
+                onTap: () => _controller.changeSymbol(item),
               );
             }).toList(),
           ),
         ),
         const SizedBox(height: 16),
         _sectionTitle('وضعیت بازارها'),
-        _marketStatusCard(
-          'رمزارز',
-          MarketType.crypto,
-        ),
-        _marketStatusCard(
-          'فارکس',
-          MarketType.forex,
-        ),
-        _marketStatusCard(
-          'سهام',
-          MarketType.stocks,
-        ),
-        _marketStatusCard(
-          'کالاها',
-          MarketType.commodities,
-        ),
-        _marketStatusCard(
-          'شاخص‌ها',
-          MarketType.indices,
+        _marketStatusCard('رمزارز', MarketType.crypto),
+        _marketStatusCard('فارکس', MarketType.forex),
+        _marketStatusCard('سهام', MarketType.stocks),
+        _marketStatusCard('کالاها', MarketType.commodities),
+        _marketStatusCard('شاخص‌ها', MarketType.indices),
+        const Padding(
+          padding: EdgeInsets.all(8),
+          child: Text(
+            'توجه: فید عمومی فارکس ممکن است تأخیری یا محدود باشد؛ پیش از استفاده معاملاتی باید زمان آخرین قیمت بررسی شود.',
+            style: TextStyle(fontSize: 12, color: Colors.orangeAccent),
+          ),
         ),
       ],
     );
