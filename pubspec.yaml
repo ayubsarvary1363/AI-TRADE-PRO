@@ -1,7 +1,7 @@
 name: rise_s_trade
 description: RISE S TRADE - Automated trading platform
 publish_to: 'none'
-version: 0.6.0+6
+version: 0.6.1+7
 
 environment:
   sdk: '>=3.3.0 <4.0.0'
