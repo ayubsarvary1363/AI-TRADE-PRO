@@ -418,6 +418,11 @@ class TradingController extends ChangeNotifier {
       return;
     }
 
+    if (market == MarketType.forex) {
+      status = 'تحلیل فارکس فعال است؛ ثبت معامله آزمایشی تا تکمیل تبدیل ارز و تأیید فید قیمت زنده غیرفعال است';
+      return;
+    }
+
     final signal = latestSignal!;
     final candleTime = candles.last.time;
 
