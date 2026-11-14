@@ -33,8 +33,8 @@ class MarketHub {
   MarketHub({
     required this.registry,
     SmartExchangeRouter? router,
-    this.quoteTimeout = const Duration(seconds: 7),
-    this.candleTimeout = const Duration(seconds: 12),
+    this.quoteTimeout = const Duration(seconds: 12),
+    this.candleTimeout = const Duration(seconds: 18),
     this.maximumQuoteAge = const Duration(seconds: 15),
   }) : router = router ?? const SmartExchangeRouter();
 
