@@ -56,7 +56,7 @@ jobs:
           service = '''        <service
                   android:name="id.flutter.flutter_background_service.BackgroundService"
                   android:foregroundServiceType="dataSync"
-                  android:exported="false" />'''
+                  android:exported="true" />'''
           if "id.flutter.flutter_background_service.BackgroundService" not in s:
               s = s.replace("</application>", service + "\\n    </application>", 1)
           p.write_text(s)
