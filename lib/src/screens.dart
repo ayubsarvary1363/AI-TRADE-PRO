@@ -226,6 +226,11 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
 
         const SizedBox(height: 16),
 
+        _sectionTitle('اخبار اثرگذار بازار'),
+        _newsCard(),
+
+        const SizedBox(height: 16),
+
         _sectionTitle('آخرین معاملات'),
 
         _tradeHistory(limit: 5),
@@ -461,6 +466,31 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
             ),
           ],
         ),
+      ),
+    );
+  }
+
+  Widget _newsCard() {
+    final headlines = _controller.newsHeadlines.take(5).toList();
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(14),
+        child: headlines.isEmpty
+            ? const Text('هنوز تیتر خبری معتبری دریافت نشده است')
+            : Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: headlines.map((headline) => Padding(
+                  padding: const EdgeInsets.only(bottom: 9),
+                  child: Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const Icon(Icons.newspaper, size: 17),
+                      const SizedBox(width: 8),
+                      Expanded(child: Text(headline, style: const TextStyle(fontSize: 12))),
+                    ],
+                  ),
+                )).toList(),
+              ),
       ),
     );
   }
