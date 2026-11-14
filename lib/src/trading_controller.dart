@@ -72,16 +72,57 @@ class TradingController extends ChangeNotifier {
   /// Restore the last demo account snapshot before trading is started.
   Future<void> initialize() async {
     final restored = await PortfolioPersistence.restore(portfolio);
+    final runtime = await PortfolioPersistence.restoreRuntimeState();
     if (_disposed) return;
+    if (runtime != null) {
+      market = MarketType.values.firstWhere(
+        (value) => value.name == runtime['market'],
+        orElse: () => MarketType.crypto,
+      );
+      symbol = runtime['symbol'] as String? ??
+          (market == MarketType.forex ? 'EURUSD' : 'BTCUSDT');
+      interval = runtime['interval'] as String? ?? '1h';
+      style = TradingStyle.values.firstWhere(
+        (value) => value.name == runtime['style'],
+        orElse: () => TradingStyle.mediumTerm,
+      );
+      double? number(dynamic value) =>
+          value is num && value.isFinite ? value.toDouble() : null;
+      _activeStopPrice = number(runtime['activeStopPrice']);
+      _initialRiskDistance = number(runtime['initialRiskDistance']);
+      _highestPriceSinceEntry = number(runtime['highestPriceSinceEntry']);
+      _cooldownUntil = DateTime.tryParse(runtime['cooldownUntil']?.toString() ?? '');
+      final openPosition = portfolio.positions[symbol];
+      if (openPosition == null) {
+        _clearProtectiveState();
+      } else if (_activeStopPrice == null || _activeStopPrice! <= 0) {
+        // Fail-safe recovery if an older snapshot did not include a stop.
+        _initialRiskDistance = openPosition.averageEntryPrice * 0.02;
+        _activeStopPrice = openPosition.averageEntryPrice - _initialRiskDistance!;
+        _highestPriceSinceEntry = openPosition.averageEntryPrice;
+      }
+    }
     status = restored
-        ? 'اطلاعات حساب آزمایشی از حافظه بازیابی شد'
+        ? 'معاملات، موقعیت‌های باز و تنظیمات از حافظه بازیابی شدند'
         : 'حساب آزمایشی آماده است؛ هنوز سابقه‌ای ذخیره نشده است';
     notifyListeners();
   }
 
   Future<void> _savePortfolio() async {
     try {
-      _saveQueue = _saveQueue.catchError((_) {}).then((_) => PortfolioPersistence.save(portfolio));
+      _saveQueue = _saveQueue.catchError((_) {}).then((_) async {
+        await PortfolioPersistence.save(portfolio);
+        await PortfolioPersistence.saveRuntimeState(
+          market: market.name,
+          symbol: symbol,
+          interval: interval,
+          style: style.name,
+          activeStopPrice: _activeStopPrice,
+          initialRiskDistance: _initialRiskDistance,
+          highestPriceSinceEntry: _highestPriceSinceEntry,
+          cooldownUntil: _cooldownUntil,
+        );
+      });
       await _saveQueue;
     } catch (error) {
       lastError = 'ذخیره اطلاعات حساب ناموفق بود: $error';
@@ -542,6 +583,7 @@ class TradingController extends ChangeNotifier {
     if (_disposed || market == value) return;
     market = value;
     changeSymbol(value == MarketType.forex ? 'EURUSD' : 'BTCUSDT');
+    unawaited(_savePortfolio());
     status = value == MarketType.forex
         ? 'بازار فارکس انتخاب شد؛ قیمت‌ها از فید عمومی و احتمالاً تأخیری دریافت می‌شوند'
         : 'بازار رمزارز انتخاب شد';
@@ -569,6 +611,7 @@ class TradingController extends ChangeNotifier {
     _lastProcessedCandle = null;
 
     status = 'در حال دریافت اطلاعات $symbol';
+    unawaited(_savePortfolio());
 
     _updateErrorStatus();
 
@@ -583,6 +626,7 @@ class TradingController extends ChangeNotifier {
     if (_disposed || interval == value) return;
 
     interval = value;
+    unawaited(_savePortfolio());
 
     latestSignal = null;
     candles = [];
@@ -605,6 +649,8 @@ class TradingController extends ChangeNotifier {
     if (_disposed || style == value) return;
 
     style = value;
+    unawaited(_savePortfolio());
+
     latestSignal = null;
 
     notifyListeners();
