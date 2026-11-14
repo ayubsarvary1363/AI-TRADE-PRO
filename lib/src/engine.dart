@@ -243,6 +243,47 @@ class SignalEngine {
       }
     }
 
+    // Head-and-shoulders / inverse head-and-shoulders approximation.
+    if (pivotsHigh.length >= 3) {
+      final left = pivotsHigh[pivotsHigh.length - 3];
+      final head = pivotsHigh[pivotsHigh.length - 2];
+      final right = pivotsHigh[pivotsHigh.length - 1];
+      final shouldersClose = (left - right).abs() / max(left, right) < 0.012;
+      if (head > left * 1.005 && head > right * 1.005 &&
+          shouldersClose && last.close < support) {
+        score -= 2;
+        reasons.add('ساختار احتمالی سر و شانه با شکست ناحیه گردن دیده شد');
+      }
+    }
+    if (pivotsLow.length >= 3) {
+      final left = pivotsLow[pivotsLow.length - 3];
+      final head = pivotsLow[pivotsLow.length - 2];
+      final right = pivotsLow[pivotsLow.length - 1];
+      final shouldersClose = (left - right).abs() / max(left, right) < 0.012;
+      if (head < left * 0.995 && head < right * 0.995 &&
+          shouldersClose && last.close > resistance) {
+        score += 2;
+        reasons.add('ساختار احتمالی سر و شانه معکوس با شکست مقاومت دیده شد');
+      }
+    }
+
+    // Contracting range: lower highs + higher lows, then directional breakout.
+    final recentTen = data.sublist(data.length - 11, data.length - 1);
+    final firstHalf = recentTen.take(5).toList();
+    final secondHalf = recentTen.skip(5).toList();
+    final firstHigh = firstHalf.map((c) => c.high).reduce((a, b) => a + b) / 5;
+    final secondHigh = secondHalf.map((c) => c.high).reduce((a, b) => a + b) / 5;
+    final firstLow = firstHalf.map((c) => c.low).reduce((a, b) => a + b) / 5;
+    final secondLow = secondHalf.map((c) => c.low).reduce((a, b) => a + b) / 5;
+    final contracting = secondHigh < firstHigh && secondLow > firstLow;
+    if (contracting && last.close > resistance) {
+      score += 2;
+      reasons.add('الگوی فشردگی مثلثی و شکست صعودی محدوده تشخیص داده شد');
+    } else if (contracting && last.close < support) {
+      score -= 2;
+      reasons.add('الگوی فشردگی مثلثی و شکست نزولی محدوده تشخیص داده شد');
+    }
+
     final threshold = switch (style) {
       TradingStyle.fast => 3,
       TradingStyle.mediumTerm => 4,
