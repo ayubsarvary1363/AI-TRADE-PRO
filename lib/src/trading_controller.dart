@@ -7,6 +7,7 @@ import 'engine.dart';
 import 'exchange_router.dart';
 import 'market_hub.dart';
 import 'market_provider.dart';
+import 'portfolio_persistence.dart';
 
 // =====================================================
 // AI TRADE PRO
@@ -65,6 +66,25 @@ class TradingController extends ChangeNotifier {
   });
 
   bool get isRunning => _running;
+
+  /// Restore the last demo account snapshot before trading is started.
+  Future<void> initialize() async {
+    final restored = await PortfolioPersistence.restore(portfolio);
+    if (_disposed) return;
+    status = restored
+        ? 'اطلاعات حساب آزمایشی از حافظه بازیابی شد'
+        : 'حساب آزمایشی آماده است؛ هنوز سابقه‌ای ذخیره نشده است';
+    notifyListeners();
+  }
+
+  Future<void> _savePortfolio() async {
+    try {
+      await PortfolioPersistence.save(portfolio);
+    } catch (error) {
+      lastError = 'ذخیره اطلاعات حساب ناموفق بود: $error';
+      if (!_disposed) notifyListeners();
+    }
+  }
 
   bool get isRefreshing =>
       _refreshingQuote || _refreshingCandles;
@@ -392,6 +412,7 @@ class TradingController extends ChangeNotifier {
     );
 
     if (success) {
+      unawaited(_savePortfolio());
       _activeStopPrice = stopPrice;
       _initialRiskDistance = riskDistance;
       _highestPriceSinceEntry = price;
@@ -428,7 +449,10 @@ class TradingController extends ChangeNotifier {
       quantity: position.quantity,
     );
 
-    if (success) _clearProtectiveState();
+    if (success) {
+      unawaited(_savePortfolio());
+      _clearProtectiveState();
+    }
 
     status = success
         ? 'فروش آزمایشی ثبت شد'
@@ -493,6 +517,7 @@ class TradingController extends ChangeNotifier {
         quantity: position.quantity,
       );
       if (success) {
+        unawaited(_savePortfolio());
         _cooldownUntil = DateTime.now().add(_stopCooldown);
         _clearProtectiveState();
         status = 'خروج حفاظتی انجام شد؛ ورود مجدد موقتاً متوقف است';
@@ -581,6 +606,7 @@ class TradingController extends ChangeNotifier {
     stop();
 
     portfolio.reset();
+    unawaited(_savePortfolio());
 
     latestQuote = null;
     latestSignal = null;
