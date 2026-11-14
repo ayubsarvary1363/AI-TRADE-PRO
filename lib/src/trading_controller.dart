@@ -27,11 +27,13 @@ class TradingController extends ChangeNotifier {
 
   TradingStyle style = TradingStyle.mediumTerm;
 
+  MarketType market = MarketType.crypto;
   String symbol = 'BTCUSDT';
   String interval = '1h';
 
   Timer? _quoteTimer;
   Timer? _candleTimer;
+  Future<void> _saveQueue = Future<void>.value();
 
   bool _running = false;
   bool _refreshingQuote = false;
@@ -79,7 +81,8 @@ class TradingController extends ChangeNotifier {
 
   Future<void> _savePortfolio() async {
     try {
-      await PortfolioPersistence.save(portfolio);
+      _saveQueue = _saveQueue.then((_) => PortfolioPersistence.save(portfolio));
+      await _saveQueue;
     } catch (error) {
       lastError = 'ذخیره اطلاعات حساب ناموفق بود: $error';
       if (!_disposed) notifyListeners();
@@ -210,7 +213,7 @@ class TradingController extends ChangeNotifier {
     try {
       final quote = await marketHub.getBestQuote(
         symbol,
-        market: MarketType.crypto,
+        market: market,
       );
 
       if (_disposed) return;
@@ -269,7 +272,7 @@ class TradingController extends ChangeNotifier {
       final result = await marketHub.fetchCandles(
         symbol,
         interval,
-        market: MarketType.crypto,
+        market: market,
         limit: 200,
       );
 
@@ -533,6 +536,18 @@ class TradingController extends ChangeNotifier {
   }
 
   // -------------------- SETTINGS --------------------
+
+  void changeMarket(MarketType value) {
+    if (_disposed || market == value) return;
+    market = value;
+    changeSymbol(value == MarketType.forex ? 'EURUSD' : 'BTCUSDT');
+    status = value == MarketType.forex
+        ? 'بازار فارکس انتخاب شد؛ قیمت‌ها از فید عمومی و احتمالاً تأخیری دریافت می‌شوند'
+        : 'بازار رمزارز انتخاب شد';
+    notifyListeners();
+  }
+
+  Future<void> persistNow() => _savePortfolio();
 
   void changeSymbol(String value) {
     if (_disposed || value.trim().isEmpty) return;
