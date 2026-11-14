@@ -7,6 +7,43 @@ import 'engine.dart';
 /// Local durable snapshot for the demo portfolio. Live funds are never stored here.
 class PortfolioPersistence {
   static const _key = 'rise_s_trade.demo_portfolio.v1';
+  static const _runtimeKey = 'rise_s_trade.runtime_state.v1';
+
+  static Future<void> saveRuntimeState({
+    required String market,
+    required String symbol,
+    required String interval,
+    required String style,
+    double? activeStopPrice,
+    double? initialRiskDistance,
+    double? highestPriceSinceEntry,
+    DateTime? cooldownUntil,
+  }) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(_runtimeKey, jsonEncode({
+      'market': market,
+      'symbol': symbol,
+      'interval': interval,
+      'style': style,
+      'activeStopPrice': activeStopPrice,
+      'initialRiskDistance': initialRiskDistance,
+      'highestPriceSinceEntry': highestPriceSinceEntry,
+      'cooldownUntil': cooldownUntil?.toIso8601String(),
+      'savedAt': DateTime.now().toUtc().toIso8601String(),
+    }));
+  }
+
+  static Future<Map<String, dynamic>?> restoreRuntimeState() async {
+    final prefs = await SharedPreferences.getInstance();
+    final raw = prefs.getString(_runtimeKey);
+    if (raw == null || raw.isEmpty) return null;
+    try {
+      final value = jsonDecode(raw);
+      return value is Map<String, dynamic> ? value : null;
+    } catch (_) {
+      return null;
+    }
+  }
 
   static Future<void> save(PaperPortfolio portfolio) async {
     final prefs = await SharedPreferences.getInstance();
