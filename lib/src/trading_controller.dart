@@ -7,6 +7,7 @@ import 'engine.dart';
 import 'exchange_router.dart';
 import 'market_hub.dart';
 import 'market_provider.dart';
+import 'market_symbols.dart';
 
 // =====================================================
 // AI TRADE PRO
@@ -31,6 +32,10 @@ class TradingController extends ChangeNotifier {
 
   Timer? _quoteTimer;
   Timer? _candleTimer;
+  Timer? _scanTimer;
+  bool _scanningMarkets = false;
+  int scannedMarketCount = 0;
+  final Map<String, DateTime> _lastScannedCandles = {};
 
   bool _running = false;
   bool _refreshingQuote = false;
@@ -153,6 +158,11 @@ class TradingController extends ChangeNotifier {
       const Duration(seconds: 30),
       (_) => refreshCandles(),
     );
+    unawaited(scanAllMarkets());
+    _scanTimer = Timer.periodic(
+      const Duration(minutes: 2),
+      (_) => scanAllMarkets(),
+    );
   }
 
   // -------------------- STOP --------------------
@@ -162,9 +172,11 @@ class TradingController extends ChangeNotifier {
 
     _quoteTimer?.cancel();
     _candleTimer?.cancel();
+    _scanTimer?.cancel();
 
     _quoteTimer = null;
     _candleTimer = null;
+    _scanTimer = null;
 
     status = 'ربات آزمایشی متوقف شد';
 
@@ -294,8 +306,6 @@ class TradingController extends ChangeNotifier {
       _updateErrorStatus();
 
       if (_quoteHealthy && _candlesHealthy) {
-        _processNewSignal();
-
         if (lastError == null && !_running) {
           status = 'اطلاعات بازار دریافت شد';
         }
@@ -310,6 +320,89 @@ class TradingController extends ChangeNotifier {
       _refreshingCandles = false;
 
       if (!_disposed) notifyListeners();
+    }
+  }
+
+  // -------------------- MULTI-SYMBOL MARKET SCANNER --------------------
+
+  Future<void> scanAllMarkets() async {
+    if (_disposed || !_running || _scanningMarkets) return;
+    _scanningMarkets = true;
+    scannedMarketCount = 0;
+    status = 'اسکن خودکار ${MarketSymbols.crypto.length} رمزارز آغاز شد';
+    notifyListeners();
+    try {
+      const batchSize = 4;
+      final symbols = MarketSymbols.crypto;
+      for (var offset = 0; offset < symbols.length; offset += batchSize) {
+        if (_disposed || !_running) break;
+        final batch = symbols.skip(offset).take(batchSize).toList();
+        await Future.wait(batch.map(_scanOneSymbol));
+        scannedMarketCount = (offset + batch.length).clamp(0, symbols.length).toInt();
+        if (!_disposed) notifyListeners();
+      }
+      if (!_disposed && _running) {
+        status = 'اسکن بازار کامل شد: $scannedMarketCount از ${symbols.length} نماد';
+      }
+    } catch (error) {
+      if (!_disposed) status = 'خطا در اسکن بازار: $error';
+    } finally {
+      _scanningMarkets = false;
+      if (!_disposed) notifyListeners();
+    }
+  }
+
+  Future<void> _scanOneSymbol(String marketSymbol) async {
+    if (_disposed || !_running) return;
+    try {
+      final results = await Future.wait([
+        marketHub.getBestQuote(marketSymbol, market: MarketType.crypto),
+        marketHub.fetchCandles(marketSymbol, interval,
+            market: MarketType.crypto, limit: 120),
+      ]);
+      if (_disposed || !_running) return;
+      final quote = results[0] as MarketQuote?;
+      final marketCandles = results[1] as List<Candle>;
+      if (quote == null || !quote.isValid ||
+          !quote.isFresh(maximumAge: const Duration(seconds: 15)) ||
+          marketCandles.length < 30) return;
+
+      _lastQuotes[marketSymbol] = quote;
+      _lastPrices[marketSymbol] = quote.midPrice;
+      final signal = signalEngine.analyze(marketCandles, style: style);
+      final candleTime = marketCandles.last.time;
+      if (_lastScannedCandles[marketSymbol] == candleTime) return;
+      _lastScannedCandles[marketSymbol] = candleTime;
+      if (signal.direction == SignalDirection.hold || signal.confidence < 0.60) return;
+
+      final equityNow = portfolio.updateEquity(_currentPrices);
+      if (!riskManager.canTrade(currentEquity: equityNow,
+          dayStartingEquity: portfolio.dayStartingEquity,
+          peakEquity: portfolio.peakEquity)) {
+        stop();
+        status = 'توقف خودکار به دلیل محدودیت ریسک';
+        return;
+      }
+      if (signal.direction == SignalDirection.buy) {
+        if (portfolio.positions.containsKey(marketSymbol)) return;
+        final entry = quote.ask;
+        final quantity = riskManager.calculatePositionSize(
+          equity: equityNow, entryPrice: entry,
+          stopPrice: entry * 0.98, confidence: signal.confidence);
+        if (quantity > 0 && portfolio.buy(
+          symbol: marketSymbol, price: entry, quantity: quantity)) {
+          status = 'خرید آزمایشی $marketSymbol ثبت شد';
+        }
+      } else if (signal.direction == SignalDirection.sell) {
+        final position = portfolio.positions[marketSymbol];
+        if (position == null) return;
+        if (portfolio.sell(symbol: marketSymbol, price: quote.bid,
+            quantity: position.quantity)) {
+          status = 'فروش آزمایشی $marketSymbol ثبت شد';
+        }
+      }
+    } catch (_) {
+      // An unavailable pair does not interrupt scanning other symbols.
     }
   }
 
@@ -538,6 +631,7 @@ class TradingController extends ChangeNotifier {
 
     _quoteTimer?.cancel();
     _candleTimer?.cancel();
+    _scanTimer?.cancel();
 
     unawaited(marketHub.dispose());
 
