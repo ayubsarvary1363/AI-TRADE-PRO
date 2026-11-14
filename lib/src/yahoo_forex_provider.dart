@@ -43,7 +43,8 @@ class YahooForexProvider implements MarketProvider, CandleMarketProvider {
           .timeout(const Duration(seconds: 10));
       if (response.statusCode != 200) return false;
       final decoded = jsonDecode(response.body);
-      final result = decoded is Map ? decoded['chart']?['result'] : null;
+      final chart = decoded is Map ? decoded['chart'] : null;
+      final result = chart is Map ? chart['result'] : null;
       return result is List && result.isNotEmpty;
     } catch (_) {
       return false;
