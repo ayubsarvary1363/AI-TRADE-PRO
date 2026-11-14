@@ -71,7 +71,7 @@ class MarketHub {
         if (_disposed) return;
 
         if (quote == null) {
-          providerErrors[provider.id] = 'قیمت دریافت نشد';
+          providerErrors[provider.id] = 'منبع پاسخ داد اما قیمت معتبری برنگرداند';
           return;
         }
 
@@ -263,7 +263,7 @@ class MarketHub {
 
         if (valid.length < 30) {
           providerErrors[marketProvider.id] =
-              'تعداد کندل معتبر کمتر از ۳۰ است';
+              'فقط ${valid.length} کندل معتبر دریافت شد؛ حداقل ۳۰ کندل لازم است';
           return <Candle>[];
         }
 
