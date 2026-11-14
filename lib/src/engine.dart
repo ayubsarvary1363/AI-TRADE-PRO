@@ -129,8 +129,8 @@ class SignalEngine {
     final rsi = _rsi(closes, 14);
 
     final recent = data.sublist(data.length - 20, data.length - 1);
-    final resistance = recent.map((c) => c.high).reduce(max);
-    final support = recent.map((c) => c.low).reduce(min);
+    final resistance = recent.map((c) => c.high).reduce((a, b) => a > b ? a : b);
+    final support = recent.map((c) => c.low).reduce((a, b) => a < b ? a : b);
     final averageVolume = _average(data.skip(data.length - 21).take(20).map((c) => c.volume).toList());
     final volumeConfirmed = averageVolume <= 0 || last.volume >= averageVolume * 1.15;
 
@@ -217,7 +217,8 @@ class SignalEngine {
     // Simple double-top / double-bottom detection from recent swing points.
     final pivotsHigh = <double>[];
     final pivotsLow = <double>[];
-    for (int i = max(1, data.length - 35); i < data.length - 1; i++) {
+    final pivotStart = max(1, data.length - 35).toInt();
+    for (int i = pivotStart; i < data.length - 1; i++) {
       if (data[i].high >= data[i - 1].high && data[i].high >= data[i + 1].high) {
         pivotsHigh.add(data[i].high);
       }
@@ -255,7 +256,7 @@ class SignalEngine {
     }
     final confidence = direction == SignalDirection.hold
         ? 0.0
-        : min(0.95, 0.50 + (score.abs() * 0.045));
+        : min(0.95, 0.50 + (score.abs() * 0.045)).toDouble();
     return TradeSignal(
       direction: direction,
       confidence: confidence,
