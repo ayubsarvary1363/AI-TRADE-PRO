@@ -28,12 +28,12 @@ class MarketNewsService {
       throw StateError('News feed HTTP ${response.statusCode}');
     }
     final body = response.body;
-    final matches = RegExp(r'<item>([\\s\\S]*?)</item>', caseSensitive: false)
+    final matches = RegExp(r'<item>([\s\S]*?)</item>', caseSensitive: false)
         .allMatches(body);
     final headlines = <String>[];
     for (final match in matches.take(12)) {
       final item = match.group(1) ?? '';
-      final titleMatch = RegExp(r'<title><!\\[CDATA\\[(.*?)\\]\\]></title>|<title>(.*?)</title>',
+      final titleMatch = RegExp(r'<title><!\[CDATA\[(.*?)\]\]></title>|<title>(.*?)</title>',
           caseSensitive: false, dotAll: true).firstMatch(item);
       final raw = titleMatch?.group(1) ?? titleMatch?.group(2);
       if (raw == null) continue;
