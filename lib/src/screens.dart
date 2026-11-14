@@ -633,18 +633,13 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
 
   Widget _tradeHistory({int? limit}) {
     final allFills = _controller.portfolio.fills.reversed.toList();
-
-    final fills = limit == null
-        ? allFills
-        : allFills.take(limit).toList();
+    final fills = limit == null ? allFills : allFills.take(limit).toList();
 
     if (fills.isEmpty) {
       return const Card(
         child: Padding(
           padding: EdgeInsets.all(18),
-          child: Center(
-            child: Text('هنوز معامله‌ای ثبت نشده است'),
-          ),
+          child: Center(child: Text('هنوز معامله‌ای ثبت نشده است')),
         ),
       );
     }
@@ -653,23 +648,57 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       child: Column(
         children: fills.map((fill) {
           final isBuy = fill.side == SignalDirection.buy;
+          final notional = fill.price * fill.quantity;
+          final sideLabel = isBuy ? 'خرید' : 'فروش';
+          final time = fill.time.toLocal();
+          final timeLabel =
+              '${time.year}/${time.month.toString().padLeft(2, '0')}/${time.day.toString().padLeft(2, '0')} '
+              '${time.hour.toString().padLeft(2, '0')}:${time.minute.toString().padLeft(2, '0')}:${time.second.toString().padLeft(2, '0')}';
 
-          return ListTile(
-            leading: Icon(
-              isBuy ? Icons.arrow_downward : Icons.arrow_upward,
-              color: isBuy ? Colors.greenAccent : Colors.redAccent,
+          return ExpansionTile(
+            leading: CircleAvatar(
+              backgroundColor: (isBuy ? Colors.green : Colors.red).withOpacity(0.16),
+              child: Icon(
+                isBuy ? Icons.south_west : Icons.north_east,
+                color: isBuy ? Colors.greenAccent : Colors.redAccent,
+              ),
             ),
-            title: Text(
-              '${isBuy ? 'خرید' : 'فروش'} ${fill.symbol}',
-            ),
+            title: Text('$sideLabel ${fill.symbol}'),
             subtitle: Text(
-              '${fill.quantity.toStringAsFixed(6)} واحد • '
-              '${fill.time.toLocal()}',
+              '${fill.quantity.toStringAsFixed(6)} واحد  •  $timeLabel',
+              style: const TextStyle(fontSize: 11),
             ),
             trailing: Text(
-              '${fill.price.toStringAsFixed(4)}',
+              fill.price.toStringAsFixed(6),
               style: const TextStyle(fontWeight: FontWeight.bold),
             ),
+            childrenPadding: const EdgeInsets.fromLTRB(16, 0, 16, 14),
+            children: [
+              const Divider(height: 8),
+              _summaryRow('نوع عملیات', 'معامله آزمایشی $sideLabel'),
+              _summaryRow('نماد', fill.symbol),
+              _summaryRow('قیمت هر واحد', fill.price.toStringAsFixed(8)),
+              _summaryRow('مقدار معامله', fill.quantity.toStringAsFixed(8)),
+              _summaryRow('ارزش ناخالص معامله', notional.toStringAsFixed(6)),
+              _summaryRow('کارمزد', fill.fee.toStringAsFixed(6)),
+              _summaryRow(
+                'سود/زیان تحقق‌یافته',
+                fill.realizedPnl.toStringAsFixed(6),
+              ),
+              _summaryRow('زمان ثبت', timeLabel),
+              _summaryRow('شناسه معامله', fill.id),
+              if (isBuy)
+                const Padding(
+                  padding: EdgeInsets.only(top: 8),
+                  child: Align(
+                    alignment: Alignment.centerRight,
+                    child: Text(
+                      'این خرید هنوز سود یا زیان تحقق‌یافته ندارد؛ نتیجه آن با فروش مشخص می‌شود.',
+                      style: TextStyle(fontSize: 11, color: Colors.white70),
+                    ),
+                  ),
+                ),
+            ],
           );
         }).toList(),
       ),
