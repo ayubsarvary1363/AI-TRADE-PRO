@@ -106,6 +106,15 @@ class TradingController extends ChangeNotifier {
         _highestPriceSinceEntry = openPosition.averageEntryPrice;
       }
     }
+    final restoredPosition = portfolio.positions[symbol];
+    if (restoredPosition != null &&
+        (_activeStopPrice == null || _activeStopPrice! <= 0)) {
+      // Backward-compatible protective stop for snapshots saved by older builds.
+      _initialRiskDistance = restoredPosition.averageEntryPrice * 0.02;
+      _activeStopPrice =
+          restoredPosition.averageEntryPrice - _initialRiskDistance!;
+      _highestPriceSinceEntry = restoredPosition.averageEntryPrice;
+    }
     status = restored
         ? 'معاملات، موقعیت‌های باز و تنظیمات از حافظه بازیابی شدند'
         : 'حساب آزمایشی آماده است؛ هنوز سابقه‌ای ذخیره نشده است';
