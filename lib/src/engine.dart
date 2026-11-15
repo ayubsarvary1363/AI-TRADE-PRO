@@ -145,6 +145,66 @@ class SignalEngine {
     final last = valid.last;
     final previous = valid[valid.length - 2];
 
+    // Additional technical-analysis set: Bollinger Bands, Stochastic,
+    // ATR volatility, swing support/resistance and candle patterns.
+    final recent = valid.skip(valid.length - 20).toList();
+    final sma20 = recent.map((c) => c.close).reduce((a, b) => a + b) / recent.length;
+    final variance = recent
+        .map((c) => (c.close - sma20) * (c.close - sma20))
+        .reduce((a, b) => a + b) / recent.length;
+    final deviation = sqrt(variance);
+    final bollingerUpper = sma20 + (2 * deviation);
+    final bollingerLower = sma20 - (2 * deviation);
+
+    final stochasticCandles = valid.skip(valid.length - 14).toList();
+    final stochasticHigh = stochasticCandles
+        .map((c) => c.high).reduce(max);
+    final stochasticLow = stochasticCandles
+        .map((c) => c.low).reduce(min);
+    final stochastic = stochasticHigh > stochasticLow
+        ? ((last.close - stochasticLow) /
+            (stochasticHigh - stochasticLow)) * 100
+        : 50.0;
+
+    double atrTotal = 0;
+    for (int i = valid.length - 14; i < valid.length; i++) {
+      final candle = valid[i];
+      final priorClose = valid[i - 1].close;
+      atrTotal += max(
+        candle.high - candle.low,
+        max((candle.high - priorClose).abs(),
+            (candle.low - priorClose).abs()),
+      );
+    }
+    final atr = atrTotal / 14;
+
+    final swingCandles = valid.skip(valid.length - 30).toList();
+    final support = swingCandles.map((c) => c.low).reduce(min);
+    final resistance = swingCandles.map((c) => c.high).reduce(max);
+    final swingRange = resistance - support;
+
+    final body = (last.close - last.open).abs();
+    final candleRange = last.high - last.low;
+    final upperWick = last.high - max(last.open, last.close);
+    final lowerWick = min(last.open, last.close) - last.low;
+    final bullishEngulfing = previous.close < previous.open &&
+        last.close > last.open &&
+        last.open <= previous.close &&
+        last.close >= previous.open;
+    final bearishEngulfing = previous.close > previous.open &&
+        last.close < last.open &&
+        last.open >= previous.close &&
+        last.close <= previous.open;
+    final hammer = candleRange > 0 &&
+        lowerWick >= body * 2 &&
+        upperWick <= body &&
+        last.close >= last.open;
+    final shootingStar = candleRange > 0 &&
+        upperWick >= body * 2 &&
+        lowerWick <= body &&
+        last.close <= last.open;
+    final doji = candleRange > 0 && body / candleRange <= 0.1;
+
     int score = 0;
     final reasons = <String>[];
 
@@ -190,6 +250,60 @@ class SignalEngine {
     } else if (last.close < previous.close) {
       score--;
       reasons.add('آخرین کندل نسبت به کندل قبل نزولی است');
+    }
+
+    if (last.close < bollingerLower) {
+      score++;
+      reasons.add('قیمت زیر باند پایینی بولینگر است؛ احتمال بازگشت بررسی شود');
+    } else if (last.close > bollingerUpper) {
+      score--;
+      reasons.add('قیمت بالای باند بالایی بولینگر است؛ احتمال اصلاح بررسی شود');
+    } else {
+      reasons.add('قیمت داخل باندهای بولینگر قرار دارد');
+    }
+
+    if (stochastic < 20) {
+      score++;
+      reasons.add('استوکاستیک در محدوده اشباع فروش است');
+    } else if (stochastic > 80) {
+      score--;
+      reasons.add('استوکاستیک در محدوده اشباع خرید است');
+    }
+
+    if (bullishEngulfing || hammer) {
+      score++;
+      reasons.add(bullishEngulfing
+          ? 'الگوی کندلی پوشای صعودی شناسایی شد'
+          : 'الگوی چکش صعودی شناسایی شد');
+    } else if (bearishEngulfing || shootingStar) {
+      score--;
+      reasons.add(bearishEngulfing
+          ? 'الگوی کندلی پوشای نزولی شناسایی شد'
+          : 'الگوی ستاره ثاقب نزولی شناسایی شد');
+    } else if (doji) {
+      reasons.add('الگوی دوجی؛ بلاتکلیفی بازار');
+    }
+
+    if (swingRange > 0) {
+      final fib382 = resistance - swingRange * 0.382;
+      final fib500 = resistance - swingRange * 0.500;
+      final fib618 = resistance - swingRange * 0.618;
+      final fibLevels = [fib382, fib500, fib618];
+      final nearFib = fibLevels.any((level) =>
+          (last.close - level).abs() / last.close <= 0.003);
+      if (nearFib) {
+        reasons.add('قیمت نزدیک یکی از سطوح اصلاح فیبوناچی ۳۸٫۲، ۵۰ یا ۶۱٫۸٪ است');
+      }
+      if ((last.close - support).abs() / last.close <= 0.003) {
+        reasons.add('قیمت نزدیک حمایت ۳۰ کندل اخیر است');
+      } else if ((last.close - resistance).abs() / last.close <= 0.003) {
+        reasons.add('قیمت نزدیک مقاومت ۳۰ کندل اخیر است');
+      }
+    }
+
+    if (atr > 0 && last.close > 0) {
+      final volatilityPercent = atr / last.close * 100;
+      reasons.add('نوسان ATR: ${volatilityPercent.toStringAsFixed(2)}٪');
     }
 
     final threshold = switch (style) {
