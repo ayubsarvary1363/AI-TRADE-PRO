@@ -74,7 +74,88 @@ class MarketNewsService {
         .firstMatch(xml);
     if (match == null) return '';
     var value = (match.group(1) ?? '').trim();
-    value = value.replaceAll(RegExp(r'^<!\[CDATA\['), '')
+        .replaceAll(RegExp(r'\]\]>
+        .replaceAll(RegExp(r'\]\]>, '');
+    return value
+        .replaceAll('&amp;', '&')
+        .replaceAll('&quot;', '"')
+        .replaceAll('&#39;', "'")
+        .replaceAll('&apos;', "'")
+        .replaceAll('&lt;', '<')
+        .replaceAll('&gt;', '>');
+  }
+
+  DateTime? _tryHttpDate(String value) {
+    try {
+      return DateTime.parse(value);
+    } catch (_) {
+      try {
+        return HttpDate.parse(value);
+      } catch (_) {
+        return null;
+      }
+    }
+  }
+
+  int _sentiment(String title) {
+    final value = title.toLowerCase();
+    const positive = [
+      'surge', 'rally', 'gain', 'rise', 'bullish', 'approval',
+      'adoption', 'record high', 'breakout', 'inflow', 'recovery',
+    ];
+    const negative = [
+      'crash', 'plunge', 'drop', 'fall', 'bearish', 'hack',
+      'lawsuit', 'ban', 'outflow', 'sell-off', 'liquidation',
+      'recession', 'inflation shock',
+    ];
+    final up = positive.where(value.contains).length;
+    final down = negative.where(value.contains).length;
+    if (up > down) return 1;
+    if (down > up) return -1;
+    return 0;
+  }
+}
+), '');
+    return value
+        .replaceAll('&amp;', '&')
+        .replaceAll('&quot;', '"')
+        .replaceAll('&#39;', "'")
+        .replaceAll('&apos;', "'")
+        .replaceAll('&lt;', '<')
+        .replaceAll('&gt;', '>');
+  }
+
+  DateTime? _tryHttpDate(String value) {
+    try {
+      return DateTime.parse(value);
+    } catch (_) {
+      try {
+        return HttpDate.parse(value);
+      } catch (_) {
+        return null;
+      }
+    }
+  }
+
+  int _sentiment(String title) {
+    final value = title.toLowerCase();
+    const positive = [
+      'surge', 'rally', 'gain', 'rise', 'bullish', 'approval',
+      'adoption', 'record high', 'breakout', 'inflow', 'recovery',
+    ];
+    const negative = [
+      'crash', 'plunge', 'drop', 'fall', 'bearish', 'hack',
+      'lawsuit', 'ban', 'outflow', 'sell-off', 'liquidation',
+      'recession', 'inflation shock',
+    ];
+    final up = positive.where(value.contains).length;
+    final down = negative.where(value.contains).length;
+    if (up > down) return 1;
+    if (down > up) return -1;
+    return 0;
+  }
+}
+), '');
         .replaceAll(RegExp(r'\]\]>, '');
     return value
         .replaceAll('&amp;', '&')
