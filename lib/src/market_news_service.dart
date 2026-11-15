@@ -7,6 +7,10 @@ class MarketNewsItem {
   final String source;
   final DateTime? publishedAt;
   final int sentiment; // -1 negative, 0 neutral, 1 positive
+  final String market;
+  final String impact;
+  final int importance; // 1..5, heuristic estimate
+  final bool highRisk;
 
   const MarketNewsItem({
     required this.title,
@@ -14,68 +18,98 @@ class MarketNewsItem {
     required this.source,
     required this.publishedAt,
     required this.sentiment,
+    required this.market,
+    required this.impact,
+    required this.importance,
+    required this.highRisk,
   });
 }
 
 class MarketNewsService {
+  // Separate searches improve coverage; Google News RSS is an aggregator,
+  // not a guarantee that every publisher or market is represented.
   static const _topics = <String>[
-    'cryptocurrency market bitcoin ethereum',
-    'forex currency market central banks',
-    'global financial markets stocks commodities',
+    'Bitcoin cryptocurrency Ethereum regulation ETF exchange hack',
+    'crypto market Bitcoin institutional adoption flows',
+    'forex currency markets central banks exchange rates',
+    'Federal Reserve FOMC interest rate decision US dollar',
+    'ECB BOE BOJ interest rates monetary policy',
+    'US CPI inflation jobs payroll GDP economic calendar',
+    'geopolitics oil gold global financial markets',
   ];
 
-  Future<List<MarketNewsItem>> fetchLatest({int perTopic = 8}) async {
+  Future<List<MarketNewsItem>> fetchLatest({int perTopic = 10}) async {
     final all = <MarketNewsItem>[];
-    for (final topic in _topics) {
-      final uri = Uri.https('news.google.com', '/rss/search', {
-        'q': topic,
-        'hl': 'en-US',
-        'gl': 'US',
-        'ceid': 'US:en',
-      });
-      final response = await http.get(uri, headers: {
-        'User-Agent': 'AI-Trade-Pro/0.7 (market-news-reader)',
-      }).timeout(const Duration(seconds: 12));
-      if (response.statusCode != 200) {
-        throw Exception('دریافت اخبار ناموفق بود: HTTP ${response.statusCode}');
+    final client = http.Client();
+    try {
+      final responses = await Future.wait(_topics.map((topic) async {
+        final uri = Uri.https('news.google.com', '/rss/search', {
+          'q': topic,
+          'hl': 'en-US',
+          'gl': 'US',
+          'ceid': 'US:en',
+        });
+        final response = await client.get(uri, headers: {
+          'User-Agent': 'AI-Trade-Pro/0.8 (market-news-reader)',
+        }).timeout(const Duration(seconds: 15));
+        if (response.statusCode != 200) return <MarketNewsItem>[];
+        final parsed = <MarketNewsItem>[];
+        for (final match in RegExp(r'<item>([\\s\\S]*?)</item>')
+            .allMatches(response.body).take(perTopic)) {
+          final xml = match.group(1) ?? '';
+          final title = _tag(xml, 'title');
+          final link = _tag(xml, 'link');
+          if (title.isEmpty || link.isEmpty) continue;
+          final source = _tag(xml, 'source');
+          final dateText = _tag(xml, 'pubDate');
+          final analysis = _analyse(title);
+          parsed.add(MarketNewsItem(
+            title: title,
+            link: link,
+            source: source.isEmpty ? 'Google News' : source,
+            publishedAt: _tryDate(dateText),
+            sentiment: analysis.sentiment,
+            market: analysis.market,
+            impact: analysis.impact,
+            importance: analysis.importance,
+            highRisk: analysis.highRisk,
+          ));
+        }
+        return parsed;
+      }));
+      for (final batch in responses) {
+        all.addAll(batch);
       }
-      final items = RegExp(r'<item>([\s\S]*?)</item>')
-          .allMatches(response.body)
-          .take(perTopic);
-      for (final match in items) {
-        final xml = match.group(1) ?? '';
-        final title = _tag(xml, 'title');
-        final link = _tag(xml, 'link');
-        final source = _tag(xml, 'source');
-        final dateText = _tag(xml, 'pubDate');
-        if (title.isEmpty || link.isEmpty) continue;
-        all.add(MarketNewsItem(
-          title: title,
-          link: link,
-          source: source.isEmpty ? 'Google News' : source,
-          publishedAt: DateTime.tryParse(dateText) ??
-              _tryHttpDate(dateText),
-          sentiment: _sentiment(title),
-        ));
-      }
+    } finally {
+      client.close();
     }
+
     final unique = <String, MarketNewsItem>{};
     for (final item in all) {
-      unique[item.link] = item;
+      final key = item.link.isNotEmpty
+          ? item.link
+          : item.title.toLowerCase().trim();
+      unique.putIfAbsent(key, () => item);
     }
-    final result = unique.values.toList()
+    final result = unique.values.where(_isRecent).toList()
       ..sort((a, b) => (b.publishedAt ?? DateTime(1970))
           .compareTo(a.publishedAt ?? DateTime(1970)));
     return result;
   }
 
+  bool _isRecent(MarketNewsItem item) {
+    final date = item.publishedAt;
+    if (date == null) return true;
+    return DateTime.now().difference(date).inDays <= 7;
+  }
+
   String _tag(String xml, String name) {
-    final match = RegExp('<$name(?:\\s[^>]*)?>([\\s\\S]*?)</$name>')
+    final match = RegExp('<$name(?:\\\\s[^>]*)?>([\\\\s\\\\S]*?)</$name>')
         .firstMatch(xml);
     if (match == null) return '';
     var value = (match.group(1) ?? '').trim();
-    value = value.replaceAll(RegExp(r'^<!\[CDATA\['), '')
-        .replaceAll(RegExp(r'\]\]>$'), '');
+    value = value.replaceAll(RegExp(r'^<!\\[CDATA\\['), '')
+        .replaceAll(RegExp(r'\\]\\]>$'), '');
     return value
         .replaceAll('&amp;', '&')
         .replaceAll('&quot;', '"')
@@ -85,154 +119,86 @@ class MarketNewsService {
         .replaceAll('&gt;', '>');
   }
 
-  DateTime? _tryHttpDate(String value) {
+  DateTime? _tryDate(String value) {
+    if (value.isEmpty) return null;
     try {
-      return DateTime.parse(value);
+      return HttpDate.parse(value);
     } catch (_) {
-      try {
-        return HttpDate.parse(value);
-      } catch (_) {
-        return null;
-      }
+      return DateTime.tryParse(value);
     }
   }
 
-  int _sentiment(String title) {
-    final value = title.toLowerCase();
+  _NewsAnalysis _analyse(String title) {
+    final text = title.toLowerCase();
     const positive = [
       'surge', 'rally', 'gain', 'rise', 'bullish', 'approval',
       'adoption', 'record high', 'breakout', 'inflow', 'recovery',
+      'rate cut', 'cuts rates', 'eases policy',
     ];
     const negative = [
       'crash', 'plunge', 'drop', 'fall', 'bearish', 'hack',
       'lawsuit', 'ban', 'outflow', 'sell-off', 'liquidation',
-      'recession', 'inflation shock',
+      'recession', 'inflation shock', 'rate hike', 'raises rates',
+      'war', 'sanction', 'default',
     ];
-    final up = positive.where(value.contains).length;
-    final down = negative.where(value.contains).length;
-    if (up > down) return 1;
-    if (down > up) return -1;
-    return 0;
+    const highRiskTerms = [
+      'fed', 'fomc', 'interest rate', 'rate decision', 'cpi',
+      'inflation', 'payroll', 'jobs report', 'central bank',
+      'hack', 'ban', 'lawsuit', 'war', 'sanction', 'emergency',
+    ];
+    const cryptoTerms = [
+      'bitcoin', 'btc', 'ethereum', 'crypto', 'cryptocurrency',
+      'stablecoin', 'blockchain', 'token', 'exchange', 'etf',
+    ];
+    const forexTerms = [
+      'forex', 'currency', 'dollar', 'usd', 'euro', 'eur',
+      'yen', 'jpy', 'pound', 'gbp', 'fed', 'federal reserve',
+      'ecb', 'boe', 'boj', 'interest rate', 'central bank',
+      'cpi', 'payroll', 'gdp',
+    ];
+    final up = positive.where(text.contains).length;
+    final down = negative.where(text.contains).length;
+    final sentiment = up > down ? 1 : (down > up ? -1 : 0);
+    final cryptoHits = cryptoTerms.where(text.contains).length;
+    final forexHits = forexTerms.where(text.contains).length;
+    final market = cryptoHits > 0 && forexHits > 0
+        ? 'رمزارز و فارکس'
+        : cryptoHits > 0
+            ? 'رمزارز'
+            : forexHits > 0
+                ? 'فارکس'
+                : 'بازارهای جهانی';
+    final highRisk = highRiskTerms.any(text.contains);
+    final importance = highRisk
+        ? 5
+        : (cryptoHits + forexHits >= 2 ? 4 : (sentiment != 0 ? 3 : 2));
+    final impact = sentiment > 0
+        ? 'احتمال اثر مثبت'
+        : sentiment < 0
+            ? 'احتمال اثر منفی'
+            : 'اثر نامشخص یا خنثی';
+    return _NewsAnalysis(
+      sentiment: sentiment,
+      market: market,
+      impact: impact,
+      importance: importance,
+      highRisk: highRisk,
+    );
   }
 }
-), '');
-    return value
-        .replaceAll('&amp;', '&')
-        .replaceAll('&quot;', '"')
-        .replaceAll('&#39;', "'")
-        .replaceAll('&apos;', "'")
-        .replaceAll('&lt;', '<')
-        .replaceAll('&gt;', '>');
-  }
 
-  DateTime? _tryHttpDate(String value) {
-    try {
-      return DateTime.parse(value);
-    } catch (_) {
-      try {
-        return HttpDate.parse(value);
-      } catch (_) {
-        return null;
-      }
-    }
-  }
+class _NewsAnalysis {
+  final int sentiment;
+  final String market;
+  final String impact;
+  final int importance;
+  final bool highRisk;
 
-  int _sentiment(String title) {
-    final value = title.toLowerCase();
-    const positive = [
-      'surge', 'rally', 'gain', 'rise', 'bullish', 'approval',
-      'adoption', 'record high', 'breakout', 'inflow', 'recovery',
-    ];
-    const negative = [
-      'crash', 'plunge', 'drop', 'fall', 'bearish', 'hack',
-      'lawsuit', 'ban', 'outflow', 'sell-off', 'liquidation',
-      'recession', 'inflation shock',
-    ];
-    final up = positive.where(value.contains).length;
-    final down = negative.where(value.contains).length;
-    if (up > down) return 1;
-    if (down > up) return -1;
-    return 0;
-  }
-}
-), '');
-        .replaceAll(RegExp(r'\]\]>, '');
-    return value
-        .replaceAll('&amp;', '&')
-        .replaceAll('&quot;', '"')
-        .replaceAll('&#39;', "'")
-        .replaceAll('&apos;', "'")
-        .replaceAll('&lt;', '<')
-        .replaceAll('&gt;', '>');
-  }
-
-  DateTime? _tryHttpDate(String value) {
-    try {
-      return DateTime.parse(value);
-    } catch (_) {
-      try {
-        return HttpDate.parse(value);
-      } catch (_) {
-        return null;
-      }
-    }
-  }
-
-  int _sentiment(String title) {
-    final value = title.toLowerCase();
-    const positive = [
-      'surge', 'rally', 'gain', 'rise', 'bullish', 'approval',
-      'adoption', 'record high', 'breakout', 'inflow', 'recovery',
-    ];
-    const negative = [
-      'crash', 'plunge', 'drop', 'fall', 'bearish', 'hack',
-      'lawsuit', 'ban', 'outflow', 'sell-off', 'liquidation',
-      'recession', 'inflation shock',
-    ];
-    final up = positive.where(value.contains).length;
-    final down = negative.where(value.contains).length;
-    if (up > down) return 1;
-    if (down > up) return -1;
-    return 0;
-  }
-}
-), '');
-    return value
-        .replaceAll('&amp;', '&')
-        .replaceAll('&quot;', '"')
-        .replaceAll('&#39;', "'")
-        .replaceAll('&apos;', "'")
-        .replaceAll('&lt;', '<')
-        .replaceAll('&gt;', '>');
-  }
-
-  DateTime? _tryHttpDate(String value) {
-    try {
-      return DateTime.parse(value);
-    } catch (_) {
-      try {
-        return HttpDate.parse(value);
-      } catch (_) {
-        return null;
-      }
-    }
-  }
-
-  int _sentiment(String title) {
-    final value = title.toLowerCase();
-    const positive = [
-      'surge', 'rally', 'gain', 'rise', 'bullish', 'approval',
-      'adoption', 'record high', 'breakout', 'inflow', 'recovery',
-    ];
-    const negative = [
-      'crash', 'plunge', 'drop', 'fall', 'bearish', 'hack',
-      'lawsuit', 'ban', 'outflow', 'sell-off', 'liquidation',
-      'recession', 'inflation shock',
-    ];
-    final up = positive.where(value.contains).length;
-    final down = negative.where(value.contains).length;
-    if (up > down) return 1;
-    if (down > up) return -1;
-    return 0;
-  }
+  const _NewsAnalysis({
+    required this.sentiment,
+    required this.market,
+    required this.impact,
+    required this.importance,
+    required this.highRisk,
+  });
 }
