@@ -444,7 +444,7 @@ class PaperPortfolio {
         allocatedUsdt: allocatedUsdt ?? total,
         openedAt: DateTime.now(),
         stopPrice: effectiveEntry * (1 - stopLossPercent),
-        targetPrice: effectiveEntry * (1 + takeProfitPercent),
+        targetPrice: effectiveEntry * (1 + takeProfitPercent + feeRate * 2),
         highestPrice: effectiveEntry,
       );
     } else {
