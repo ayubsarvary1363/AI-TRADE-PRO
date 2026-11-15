@@ -336,7 +336,9 @@ class _HomeScreenState extends State<HomeScreen> {
                 title: Text(item.title, maxLines: 3,
                     overflow: TextOverflow.ellipsis),
                 subtitle: Text(
-                  '${item.source} • $sentimentLabel'
+                  '${item.source} • $sentimentLabel • ${item.market}\\n'
+                  '${item.impact} • اهمیت ${item.importance}/5'
+                  '${item.highRisk ? ' • خبر پرریسک' : ''}'
                   '${item.publishedAt == null ? '' : ' • ${item.publishedAt!.toLocal()}'}',
                   style: TextStyle(color: sentimentColor, fontSize: 11),
                 ),
