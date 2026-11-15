@@ -10,6 +10,9 @@ import 'dart:math';
 
 enum TradeMode { paper, live }
 
+const double defaultStopLossPercent = 0.01;
+const double defaultTakeProfitPercent = 0.05;
+
 enum SignalDirection { buy, sell, hold }
 
 enum TradingStyle { fast, mediumTerm, longTerm }
@@ -414,8 +417,8 @@ class PaperPortfolio {
     required double price,
     required double quantity,
     double? allocatedUsdt,
-    double stopLossPercent = 0.02,
-    double takeProfitPercent = 0.10,
+    double stopLossPercent = defaultStopLossPercent,
+    double takeProfitPercent = defaultTakeProfitPercent,
   }) {
     if (symbol.isEmpty ||
         price <= 0 ||
@@ -444,7 +447,7 @@ class PaperPortfolio {
         allocatedUsdt: allocatedUsdt ?? total,
         openedAt: DateTime.now(),
         stopPrice: effectiveEntry * (1 - stopLossPercent),
-        targetPrice: effectiveEntry * (1 + takeProfitPercent + feeRate * 2),
+        targetPrice: effectiveEntry * (1 + takeProfitPercent),
         highestPrice: effectiveEntry,
       );
     } else {
