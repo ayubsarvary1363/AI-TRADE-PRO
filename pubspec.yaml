@@ -1,7 +1,7 @@
 name: rise_s_trade
 description: AI Trade Pro - Secure Automated Trading Platform
 publish_to: 'none'
-version: 0.7.0+8
+version: 0.7.1+9
 
 environment:
   sdk: '>=3.3.0 <4.0.0'
