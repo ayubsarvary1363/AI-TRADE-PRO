@@ -1,6 +1,5 @@
 import 'package:flutter/material.dart';
 
-import 'binance_testnet_screen.dart';
 import 'screens.dart';
 
 class AiTradeProApp extends StatelessWidget {
@@ -27,31 +26,7 @@ class AiTradeProApp extends StatelessWidget {
           centerTitle: false,
         ),
       ),
-      home: const HomeWithExchangeAccess(),
-    );
-  }
-}
-
-/// Keeps the existing dashboard intact and exposes the new testnet screen.
-class HomeWithExchangeAccess extends StatelessWidget {
-  const HomeWithExchangeAccess({super.key});
-
-  @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      body: const HomeScreen(),
-      floatingActionButton: FloatingActionButton.extended(
-        heroTag: 'binance-testnet-access',
-        icon: const Icon(Icons.account_balance),
-        label: const Text('Binance آزمایشی'),
-        onPressed: () {
-          Navigator.of(context).push(
-            MaterialPageRoute<void>(
-              builder: (_) => const BinanceTestnetScreen(),
-            ),
-          );
-        },
-      ),
+      home: const HomeScreen(),
     );
   }
 }

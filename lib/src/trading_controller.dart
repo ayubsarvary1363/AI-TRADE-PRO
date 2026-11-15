@@ -121,6 +121,8 @@ class TradingController extends ChangeNotifier {
                 ? null : DateTime.parse(data['openedAt'] as String),
             holdingDuration: data['holdingSeconds'] == null
                 ? null : Duration(seconds: data['holdingSeconds'] as int),
+            stopPrice: (data['stopPrice'] as num?)?.toDouble(),
+            targetPrice: (data['targetPrice'] as num?)?.toDouble(),
           );
         }));
       if (!_disposed) notifyListeners();
@@ -146,6 +148,8 @@ class TradingController extends ChangeNotifier {
         'exitReason': fill.exitReason,
         'openedAt': fill.openedAt?.toIso8601String(),
         'holdingSeconds': fill.holdingDuration?.inSeconds,
+        'stopPrice': fill.stopPrice,
+        'targetPrice': fill.targetPrice,
       }).toList();
       await prefs.setString(_tradeHistoryKey, jsonEncode(records));
     } catch (_) {

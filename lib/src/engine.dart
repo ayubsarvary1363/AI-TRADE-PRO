@@ -318,6 +318,8 @@ class PaperFill {
   final String? exitReason;
   final DateTime? openedAt;
   final Duration? holdingDuration;
+  final double? stopPrice;
+  final double? targetPrice;
 
   const PaperFill({
     required this.id,
@@ -333,6 +335,8 @@ class PaperFill {
     this.exitReason,
     this.openedAt,
     this.holdingDuration,
+    this.stopPrice,
+    this.targetPrice,
   });
 }
 
@@ -517,6 +521,8 @@ class PaperPortfolio {
       exitReason: exitReason,
       openedAt: position.openedAt,
       holdingDuration: DateTime.now().difference(position.openedAt),
+      stopPrice: position.stopPrice,
+      targetPrice: position.targetPrice,
     ));
 
     return true;
