@@ -512,11 +512,11 @@ class TradingController extends ChangeNotifier {
         final entry = quote.ask;
         final quantity = riskManager.calculatePositionSize(
           equity: equityNow, entryPrice: entry,
-          stopPrice: entry * 0.98, confidence: signal.confidence);
+          stopPrice: entry * 0.995, confidence: signal.confidence);
         if (quantity > 0 && portfolio.buy(
           symbol: marketSymbol, price: entry, quantity: quantity,
           allocatedUsdt: min(10.0, quantity * entry),
-          stopLossPercent: 0.02, takeProfitPercent: 0.10)) {
+          stopLossPercent: 0.005, takeProfitPercent: 0.05)) {
           executedBuyCount++;
           _lastTradeActionBySymbol[marketSymbol] = actionKey;
           lastScanReason = 'خرید آزمایشی $marketSymbol ثبت شد';
@@ -562,14 +562,14 @@ class TradingController extends ChangeNotifier {
     final effectiveStop = max(position.stopPrice, position.trailingStop);
     if (price >= position.targetPrice) {
       portfolio.sell(symbol: marketSymbol, price: price,
-        quantity: position.quantity, exitReason: 'رسیدن به هدف سود ۱۰٪');
-      lastScanReason = '$marketSymbol: هدف سود ۱۰٪ محقق شد';
+        quantity: position.quantity, exitReason: 'رسیدن به هدف سود ۵٪');
+      lastScanReason = '$marketSymbol: هدف سود ۵٪ محقق شد';
       status = lastScanReason;
       unawaited(_persistTradeHistory());
       notifyListeners();
     } else if (price <= effectiveStop) {
       final reason = position.trailingStop > position.stopPrice
-          ? 'فعال شدن حد ضرر متحرک' : 'فعال شدن حد ضرر ۲٪';
+          ? 'فعال شدن حد ضرر متحرک' : 'فعال شدن حد ضرر ۰٫۵٪';
       portfolio.sell(symbol: marketSymbol, price: price,
         quantity: position.quantity, exitReason: reason);
       lastScanReason = '$marketSymbol: $reason';
@@ -664,8 +664,8 @@ class TradingController extends ChangeNotifier {
       price: price,
       quantity: quantity,
       allocatedUsdt: min(10.0, quantity * price),
-      stopLossPercent: 0.02,
-      takeProfitPercent: 0.10,
+      stopLossPercent: 0.005,
+      takeProfitPercent: 0.05,
     );
 
     status = success
