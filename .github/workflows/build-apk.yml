@@ -7,6 +7,7 @@ on:
     branches:
       - main
       - rise-s-trade-recovered
+      - fix/quote-candle-recovery-2026-11-15
 
 permissions:
   contents: read
