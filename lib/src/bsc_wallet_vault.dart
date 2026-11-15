@@ -1,5 +1,7 @@
 import 'dart:math';
 
+import 'package:http/http.dart' as http;
+
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:web3dart/web3dart.dart';
 
@@ -59,7 +61,7 @@ class BscWalletVault {
   Future<double> readBnbBalance({Web3Client? client}) async {
     final current = _unlockedWallet;
     if (current == null) throw StateError('ابتدا کیف پول را باز کنید');
-    final rpc = client ?? Web3Client(BscNetwork.rpcUrl, Client());
+    final rpc = client ?? Web3Client(BscNetwork.rpcUrl, http.Client());
     try {
       final amount = await rpc.getBalance(current.privateKey.address);
       return amount.getValueInUnit(EtherUnit.ether);
