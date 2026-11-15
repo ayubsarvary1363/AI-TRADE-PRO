@@ -158,9 +158,9 @@ class SignalEngine {
 
     final stochasticCandles = valid.skip(valid.length - 14).toList();
     final stochasticHigh = stochasticCandles
-        .map((c) => c.high).reduce(max);
+        .map((c) => c.high).reduce((a, b) => a > b ? a : b);
     final stochasticLow = stochasticCandles
-        .map((c) => c.low).reduce(min);
+        .map((c) => c.low).reduce((a, b) => a < b ? a : b);
     final stochastic = stochasticHigh > stochasticLow
         ? ((last.close - stochasticLow) /
             (stochasticHigh - stochasticLow)) * 100
@@ -185,8 +185,8 @@ class SignalEngine {
 
     final body = (last.close - last.open).abs();
     final candleRange = last.high - last.low;
-    final upperWick = last.high - max(last.open, last.close);
-    final lowerWick = min(last.open, last.close) - last.low;
+    final upperWick = last.high - (last.open > last.close ? last.open : last.close);
+    final lowerWick = (last.open < last.close ? last.open : last.close) - last.low;
     final bullishEngulfing = previous.close < previous.open &&
         last.close > last.open &&
         last.open <= previous.close &&
