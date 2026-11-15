@@ -54,7 +54,7 @@ class MarketNewsService {
         }).timeout(const Duration(seconds: 15));
         if (response.statusCode != 200) return <MarketNewsItem>[];
         final parsed = <MarketNewsItem>[];
-        for (final match in RegExp(r'<item>([\\s\\S]*?)</item>')
+        for (final match in RegExp(r'<item>([\s\S]*?)</item>')
             .allMatches(response.body).take(perTopic)) {
           final xml = match.group(1) ?? '';
           final title = _tag(xml, 'title');
@@ -108,8 +108,8 @@ class MarketNewsService {
         .firstMatch(xml);
     if (match == null) return '';
     var value = (match.group(1) ?? '').trim();
-    value = value.replaceAll(RegExp(r'^<!\\[CDATA\\['), '')
-        .replaceAll(RegExp(r'\\]\\]>$'), '');
+    value = value.replaceAll(RegExp(r'^<!\[CDATA\['), '')
+        .replaceAll(RegExp(r'\]\]>$'), '');
     return value
         .replaceAll('&amp;', '&')
         .replaceAll('&quot;', '"')
