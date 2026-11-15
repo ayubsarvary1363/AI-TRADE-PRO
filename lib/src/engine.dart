@@ -334,7 +334,7 @@ class PaperPortfolio {
   final List<PaperFill> fills = [];
 
   PaperPortfolio({
-    this.initialUsdt = 50,
+    this.initialUsdt = 100,
     this.feeRate = 0.001,
   })  : cashUsdt = initialUsdt,
         peakEquity = initialUsdt,
