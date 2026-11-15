@@ -1,4 +1,4 @@
-name: Build RISE S TRADE APK
+name: Build AI Trade Pro V2 APK
 
 on:
   workflow_dispatch:
@@ -6,6 +6,7 @@ on:
     branches:
       - main
       - rise-s-trade-recovered
+      - ai-trade-pro-v2-risk-analytics
 
 permissions:
   contents: read
@@ -76,6 +77,6 @@ jobs:
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: RISE-S-TRADE-APK
+          name: AI-TRADE-PRO-V2-APK
           path: build/app/outputs/flutter-apk/app-release.apk
           if-no-files-found: error
