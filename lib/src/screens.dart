@@ -640,6 +640,16 @@ class _HomeScreenState extends State<HomeScreen> {
                   '${fill.quantity.toStringAsFixed(6)} واحد • '
                   '${fill.time.toLocal()}',
                 ),
+                if (fill.entryPrice != null)
+                  Text('قیمت ورود: ${fill.entryPrice!.toStringAsFixed(6)}'),
+                if (fill.allocatedUsdt != null)
+                  Text('مبلغ تخصیص‌یافته: ${fill.allocatedUsdt!.toStringAsFixed(2)} USDT'),
+                if (fill.exitReason != null)
+                  Text('علت خروج: ${fill.exitReason}'),
+                if (fill.holdingDuration != null)
+                  Text('مدت معامله: ${fill.holdingDuration!.inMinutes} دقیقه'),
+                if (!isBuy)
+                  Text('سود/زیان تحقق‌یافته: ${fill.realizedPnl.toStringAsFixed(4)} USDT'),
                 const SizedBox(height: 4),
                 Text(
                   currentPrice == null
