@@ -508,11 +508,12 @@ class TradingController extends ChangeNotifier {
         final entry = quote.ask;
         final quantity = riskManager.calculatePositionSize(
           equity: equityNow, entryPrice: entry,
-          stopPrice: entry * 0.98, confidence: signal.confidence);
+          stopPrice: entry * (1 - defaultStopLossPercent), confidence: signal.confidence);
         if (quantity > 0 && portfolio.buy(
           symbol: marketSymbol, price: entry, quantity: quantity,
           allocatedUsdt: min(10.0, quantity * entry),
-          stopLossPercent: 0.02, takeProfitPercent: 0.10)) {
+          stopLossPercent: defaultStopLossPercent,
+          takeProfitPercent: defaultTakeProfitPercent)) {
           executedBuyCount++;
           _lastTradeActionBySymbol[marketSymbol] = actionKey;
           lastScanReason = 'خرید آزمایشی $marketSymbol ثبت شد';
@@ -550,25 +551,26 @@ class TradingController extends ChangeNotifier {
     if (price <= 0 || !price.isFinite) return;
     if (price > position.highestPrice) position.highestPrice = price;
 
-    // پس از ۳٪ رشد، حد ضرر متحرک ۱٫۵٪ پایین‌تر از اوج قیمت قرار می‌گیرد.
-    if (position.highestPrice >= position.averageEntryPrice * 1.03) {
-      final candidate = position.highestPrice * 0.985;
-      if (candidate > position.trailingStop) position.trailingStop = candidate;
-    }
-    final effectiveStop = max(position.stopPrice, position.trailingStop);
+    // خروج خودکار با حد ضرر ثابت ۱٪ یا حد سود ثابت ۵٪.
     if (price >= position.targetPrice) {
-      portfolio.sell(symbol: marketSymbol, price: price,
-        quantity: position.quantity, exitReason: 'رسیدن به هدف سود ۱۰٪');
-      lastScanReason = '$marketSymbol: هدف سود ۱۰٪ محقق شد';
+      portfolio.sell(
+        symbol: marketSymbol,
+        price: price,
+        quantity: position.quantity,
+        exitReason: 'رسیدن به حد سود ۵٪',
+      );
+      lastScanReason = '$marketSymbol: حد سود ۵٪ فعال شد';
       status = lastScanReason;
       unawaited(_persistTradeHistory());
       notifyListeners();
-    } else if (price <= effectiveStop) {
-      final reason = position.trailingStop > position.stopPrice
-          ? 'فعال شدن حد ضرر متحرک' : 'فعال شدن حد ضرر ۲٪';
-      portfolio.sell(symbol: marketSymbol, price: price,
-        quantity: position.quantity, exitReason: reason);
-      lastScanReason = '$marketSymbol: $reason';
+    } else if (price <= position.stopPrice) {
+      portfolio.sell(
+        symbol: marketSymbol,
+        price: price,
+        quantity: position.quantity,
+        exitReason: 'رسیدن به حد ضرر ۱٪',
+      );
+      lastScanReason = '$marketSymbol: حد ضرر ۱٪ فعال شد';
       status = lastScanReason;
       unawaited(_persistTradeHistory());
       notifyListeners();
@@ -641,7 +643,7 @@ class TradingController extends ChangeNotifier {
       return;
     }
 
-    final stopPrice = price * 0.98;
+    final stopPrice = price * (1 - defaultStopLossPercent);
 
     final quantity = riskManager.calculatePositionSize(
       equity: portfolio.equity(_currentPrices),
@@ -660,8 +662,8 @@ class TradingController extends ChangeNotifier {
       price: price,
       quantity: quantity,
       allocatedUsdt: min(10.0, quantity * price),
-      stopLossPercent: 0.02,
-      takeProfitPercent: 0.10,
+      stopLossPercent: defaultStopLossPercent,
+      takeProfitPercent: defaultTakeProfitPercent,
     );
 
     status = success
