@@ -1,8 +1,10 @@
 
 import 'dart:async';
 import 'dart:math';
+import 'dart:convert';
 
 import 'package:flutter/foundation.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 import 'engine.dart';
 import 'exchange_router.dart';
@@ -85,7 +87,71 @@ class TradingController extends ChangeNotifier {
 
   TradingController({
     required this.marketHub,
-  });
+  }) {
+    unawaited(_restoreTradeHistory());
+  }
+
+  static const String _tradeHistoryKey = 'rise_s_trade_paper_history_v1';
+
+  Future<void> _restoreTradeHistory() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final raw = prefs.getString(_tradeHistoryKey);
+      if (raw == null || raw.isEmpty || _disposed) return;
+      final decoded = jsonDecode(raw);
+      if (decoded is! List) return;
+      portfolio.fills
+        ..clear()
+        ..addAll(decoded.whereType<Map>().map((item) {
+          final data = Map<String, dynamic>.from(item);
+          return PaperFill(
+            id: data['id'] as String,
+            symbol: data['symbol'] as String,
+            side: data['side'] == 'buy'
+                ? SignalDirection.buy : SignalDirection.sell,
+            price: (data['price'] as num).toDouble(),
+            quantity: (data['quantity'] as num).toDouble(),
+            fee: (data['fee'] as num).toDouble(),
+            realizedPnl: (data['realizedPnl'] as num).toDouble(),
+            time: DateTime.parse(data['time'] as String),
+            entryPrice: (data['entryPrice'] as num?)?.toDouble(),
+            allocatedUsdt: (data['allocatedUsdt'] as num?)?.toDouble(),
+            exitReason: data['exitReason'] as String?,
+            openedAt: data['openedAt'] == null
+                ? null : DateTime.parse(data['openedAt'] as String),
+            holdingDuration: data['holdingSeconds'] == null
+                ? null : Duration(seconds: data['holdingSeconds'] as int),
+          );
+        }));
+      if (!_disposed) notifyListeners();
+    } catch (_) {
+      // A damaged local history must not prevent the demo app from opening.
+    }
+  }
+
+  Future<void> _persistTradeHistory() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final records = portfolio.fills.map((fill) => <String, dynamic>{
+        'id': fill.id,
+        'symbol': fill.symbol,
+        'side': fill.side.name,
+        'price': fill.price,
+        'quantity': fill.quantity,
+        'fee': fill.fee,
+        'realizedPnl': fill.realizedPnl,
+        'time': fill.time.toIso8601String(),
+        'entryPrice': fill.entryPrice,
+        'allocatedUsdt': fill.allocatedUsdt,
+        'exitReason': fill.exitReason,
+        'openedAt': fill.openedAt?.toIso8601String(),
+        'holdingSeconds': fill.holdingDuration?.inSeconds,
+      }).toList();
+      await prefs.setString(_tradeHistoryKey, jsonEncode(records));
+    } catch (_) {
+      // Trading remains paper-only if local history storage is unavailable.
+    }
+  }
 
   bool get isRunning => _running;
 
@@ -451,6 +517,7 @@ class TradingController extends ChangeNotifier {
           _lastTradeActionBySymbol[marketSymbol] = actionKey;
           lastScanReason = 'خرید آزمایشی $marketSymbol ثبت شد';
           status = lastScanReason;
+          unawaited(_persistTradeHistory());
         } else {
           insufficientFundsCount++;
           lastScanReason = '$marketSymbol: حجم معامله یا موجودی کافی نیست';
@@ -468,6 +535,7 @@ class TradingController extends ChangeNotifier {
           _lastTradeActionBySymbol[marketSymbol] = actionKey;
           lastScanReason = 'فروش آزمایشی $marketSymbol ثبت شد';
           status = lastScanReason;
+          unawaited(_persistTradeHistory());
         }
       }
     } catch (_) {
@@ -493,6 +561,7 @@ class TradingController extends ChangeNotifier {
         quantity: position.quantity, exitReason: 'رسیدن به هدف سود ۱۰٪');
       lastScanReason = '$marketSymbol: هدف سود ۱۰٪ محقق شد';
       status = lastScanReason;
+      unawaited(_persistTradeHistory());
       notifyListeners();
     } else if (price <= effectiveStop) {
       final reason = position.trailingStop > position.stopPrice
@@ -501,6 +570,7 @@ class TradingController extends ChangeNotifier {
         quantity: position.quantity, exitReason: reason);
       lastScanReason = '$marketSymbol: $reason';
       status = lastScanReason;
+      unawaited(_persistTradeHistory());
       notifyListeners();
     }
   }
@@ -597,6 +667,7 @@ class TradingController extends ChangeNotifier {
     status = success
         ? 'خرید آزمایشی ثبت شد'
         : 'موجودی برای خرید کافی نیست';
+    if (success) unawaited(_persistTradeHistory());
   }
 
   void _executePaperSell() {
@@ -629,6 +700,7 @@ class TradingController extends ChangeNotifier {
     status = success
         ? 'فروش آزمایشی ثبت شد'
         : 'ثبت فروش ناموفق بود';
+    if (success) unawaited(_persistTradeHistory());
   }
 
   // -------------------- SETTINGS --------------------
@@ -705,6 +777,9 @@ class TradingController extends ChangeNotifier {
     stop();
 
     portfolio.reset();
+    unawaited(SharedPreferences.getInstance().then(
+      (prefs) => prefs.remove(_tradeHistoryKey),
+    ));
 
     latestQuote = null;
     latestSignal = null;
