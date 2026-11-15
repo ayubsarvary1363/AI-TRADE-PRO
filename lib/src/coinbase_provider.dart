@@ -9,7 +9,7 @@ import 'engine.dart';
 import 'exchange_router.dart';
 import 'market_provider.dart';
 
-class CoinbaseProvider implements MarketProvider, CandleMarketProvider {
+class CoinbaseProvider implements MarketProvider, CandleMarketProvider, MarketProviderDiagnostics {
   final http.Client _client;
   final String restUrl;
   final String wsUrl;
@@ -24,6 +24,7 @@ class CoinbaseProvider implements MarketProvider, CandleMarketProvider {
   final Map<String, String> _symbolsByProduct = {};
   final Map<String, MarketQuote> _quotes = {};
 
+  @override
   String? lastError;
 
   CoinbaseProvider({
