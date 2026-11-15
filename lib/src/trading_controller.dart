@@ -469,7 +469,11 @@ class TradingController extends ChangeNotifier {
 
       _lastQuotes[marketSymbol] = quote;
       _lastPrices[marketSymbol] = quote.midPrice;
-      final signal = signalEngine.analyze(marketCandles, style: style);
+      final signal = signalEngine.analyze(
+        marketCandles,
+        style: style,
+        newsSentiment: marketNewsSentiment,
+      );
       final candleTime = marketCandles.last.time;
       if (signal.direction == SignalDirection.hold) {
         holdSignalCount++;
@@ -711,7 +715,7 @@ class TradingController extends ChangeNotifier {
 
   void updateMarketNewsSentiment(int sentiment) {
     if (_disposed) return;
-    final next = sentiment.clamp(-1, 1);
+    final next = sentiment < -1 ? -1 : (sentiment > 1 ? 1 : sentiment);
     if (marketNewsSentiment == next) return;
     marketNewsSentiment = next;
     if (candles.length >= 30) {
