@@ -1,7 +1,7 @@
 name: rise_s_trade
 description: AI Trade Pro - Secure Automated Trading Platform
 publish_to: 'none'
-version: 0.6.1+7
+version: 0.7.0+8
 
 environment:
   sdk: '>=3.3.0 <4.0.0'
@@ -18,6 +18,7 @@ dependencies:
   # نگهداری امن اطلاعات حساس و تنظیمات
   flutter_secure_storage: ^9.2.2
   shared_preferences: ^2.3.2
+  crypto: ^3.0.3
 
   # ذخیره دائمی معاملات و تاریخچه
   sqflite: ^2.3.3+1
