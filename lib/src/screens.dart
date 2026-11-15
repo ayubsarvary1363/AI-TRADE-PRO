@@ -8,6 +8,7 @@ import 'market_hub.dart';
 import 'provider_setup.dart';
 import 'market_symbols.dart';
 import 'trading_controller.dart';
+import 'bsc_wallet_screen.dart';
 
 // =====================================================
 // AI TRADE PRO
@@ -75,6 +76,7 @@ class _HomeScreenState extends State<HomeScreen> {
               _markets(),
               _trades(),
               _settings(),
+              const BscWalletScreen(),
             ],
           ),
           bottomNavigationBar: NavigationBar(
@@ -99,6 +101,11 @@ class _HomeScreenState extends State<HomeScreen> {
               NavigationDestination(
                 icon: Icon(Icons.settings_outlined),
                 label: 'تنظیمات',
+              ),
+              NavigationDestination(
+                icon: Icon(Icons.account_balance_wallet_outlined),
+                selectedIcon: Icon(Icons.account_balance_wallet),
+                label: 'کیف پول',
               ),
             ],
           ),
