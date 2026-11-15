@@ -116,6 +116,7 @@ class SignalEngine {
   TradeSignal analyze(
     List<Candle> candles, {
     TradingStyle style = TradingStyle.mediumTerm,
+    int newsSentiment = 0,
   }) {
     final valid = candles.where((c) => c.isValid).toList()
       ..sort((a, b) => a.time.compareTo(b.time));
@@ -304,6 +305,16 @@ class SignalEngine {
     if (atr > 0 && last.close > 0) {
       final volatilityPercent = atr / last.close * 100;
       reasons.add('نوسان ATR: ${volatilityPercent.toStringAsFixed(2)}٪');
+    }
+
+    if (newsSentiment > 0) {
+      score++;
+      reasons.add('جهت کلی تیترهای خبری اخیر مثبت است؛ اثر خبری با وزن محدود لحاظ شد');
+    } else if (newsSentiment < 0) {
+      score--;
+      reasons.add('جهت کلی تیترهای خبری اخیر منفی است؛ اثر خبری با وزن محدود لحاظ شد');
+    } else {
+      reasons.add('اخبار جهت غالب مشخصی ندارند یا داده خبری کافی نیست');
     }
 
     final threshold = switch (style) {
