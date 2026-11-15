@@ -697,6 +697,10 @@ class _HomeScreenState extends State<HomeScreen> {
         children: fills.map((fill) {
           final isBuy = fill.side == SignalDirection.buy;
           final currentPrice = _controller.priceFor(fill.symbol);
+          final isOpen = isBuy &&
+              _controller.portfolio.positions.containsKey(fill.symbol);
+          final statusLabel = isOpen ? 'باز' : 'بسته‌شده';
+          final statusColor = isOpen ? Colors.greenAccent : Colors.blueGrey;
 
           return ListTile(
             leading: Icon(
@@ -743,9 +747,27 @@ class _HomeScreenState extends State<HomeScreen> {
                 ),
               ],
             ),
-            trailing: Text(
-              '${fill.price.toStringAsFixed(4)}',
-              style: const TextStyle(fontWeight: FontWeight.bold),
+            trailing: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              crossAxisAlignment: CrossAxisAlignment.end,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Chip(
+                  label: Text(statusLabel),
+                  backgroundColor: statusColor.withOpacity(0.14),
+                  side: BorderSide(color: statusColor.withOpacity(0.45)),
+                  visualDensity: VisualDensity.compact,
+                  labelStyle: TextStyle(
+                    color: statusColor,
+                    fontSize: 11,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+                Text(
+                  fill.price.toStringAsFixed(4),
+                  style: const TextStyle(fontWeight: FontWeight.bold),
+                ),
+              ],
             ),
           );
         }).toList(),
