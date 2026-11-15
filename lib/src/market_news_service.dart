@@ -74,8 +74,8 @@ class MarketNewsService {
         .firstMatch(xml);
     if (match == null) return '';
     var value = (match.group(1) ?? '').trim();
-        .replaceAll(RegExp(r'\]\]>
-        .replaceAll(RegExp(r'\]\]>, '');
+    value = value.replaceAll(RegExp(r'^<!\[CDATA\['), '')
+        .replaceAll(RegExp(r'\]\]>$'), '');
     return value
         .replaceAll('&amp;', '&')
         .replaceAll('&quot;', '"')
