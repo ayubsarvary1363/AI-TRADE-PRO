@@ -418,8 +418,8 @@ class PaperPortfolio {
     required double price,
     required double quantity,
     double? allocatedUsdt,
-    double stopLossPercent = 0.02,
-    double takeProfitPercent = 0.10,
+    double stopLossPercent = 0.005,
+    double takeProfitPercent = 0.05,
   }) {
     if (symbol.isEmpty ||
         price <= 0 ||
