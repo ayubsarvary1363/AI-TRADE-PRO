@@ -66,7 +66,7 @@ jobs:
           PY
 
       - name: Set Android app label
-        run: sed -i 's/android:label="[^"]*"/android:label="RISE S TRADE"/' android/app/src/main/AndroidManifest.xml
+        run: sed -i 's/android:label="[^"]*"/android:label="AI Trade Pro"/' android/app/src/main/AndroidManifest.xml
 
       - name: Install dependencies
         run: flutter pub get
