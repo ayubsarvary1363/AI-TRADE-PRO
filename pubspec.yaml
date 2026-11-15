@@ -22,6 +22,7 @@ dependencies:
   # ذخیره دائمی معاملات و تاریخچه
   sqflite: ^2.3.3+1
   path: ^1.9.0
+  url_launcher: ^6.3.1
 
   # نمودار قیمت و معاملات
   fl_chart: ^0.69.0
