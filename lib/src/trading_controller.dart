@@ -62,6 +62,7 @@ class TradingController extends ChangeNotifier {
 
   MarketQuote? latestQuote;
   TradeSignal? latestSignal;
+  int marketNewsSentiment = 0;
 
   List<Candle> candles = [];
 
@@ -381,6 +382,7 @@ class TradingController extends ChangeNotifier {
       latestSignal = signalEngine.analyze(
         candles,
         style: style,
+        newsSentiment: marketNewsSentiment,
       );
 
       _updateErrorStatus();
@@ -706,6 +708,21 @@ class TradingController extends ChangeNotifier {
   }
 
   // -------------------- SETTINGS --------------------
+
+  void updateMarketNewsSentiment(int sentiment) {
+    if (_disposed) return;
+    final next = sentiment.clamp(-1, 1);
+    if (marketNewsSentiment == next) return;
+    marketNewsSentiment = next;
+    if (candles.length >= 30) {
+      latestSignal = signalEngine.analyze(
+        candles,
+        style: style,
+        newsSentiment: marketNewsSentiment,
+      );
+    }
+    notifyListeners();
+  }
 
   void changeSymbol(String value) {
     if (_disposed || value.trim().isEmpty) return;
