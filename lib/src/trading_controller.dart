@@ -554,12 +554,8 @@ class TradingController extends ChangeNotifier {
     if (price <= 0 || !price.isFinite) return;
     if (price > position.highestPrice) position.highestPrice = price;
 
-    // پس از ۳٪ رشد، حد ضرر متحرک ۱٫۵٪ پایین‌تر از اوج قیمت قرار می‌گیرد.
-    if (position.highestPrice >= position.averageEntryPrice * 1.03) {
-      final candidate = position.highestPrice * 0.985;
-      if (candidate > position.trailingStop) position.trailingStop = candidate;
-    }
-    final effectiveStop = max(position.stopPrice, position.trailingStop);
+    // Fixed per-trade stop loss: 0.5% below the effective entry price.
+    final effectiveStop = position.stopPrice;
     if (price >= position.targetPrice) {
       portfolio.sell(symbol: marketSymbol, price: price,
         quantity: position.quantity, exitReason: 'رسیدن به هدف سود ۵٪');
