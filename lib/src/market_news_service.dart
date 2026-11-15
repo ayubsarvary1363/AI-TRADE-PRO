@@ -104,7 +104,7 @@ class MarketNewsService {
   }
 
   String _tag(String xml, String name) {
-    final match = RegExp('<$name(?:\\\\s[^>]*)?>([\\\\s\\\\S]*?)</$name>')
+    final match = RegExp('<$name(?:\\s[^>]*)?>([\\s\\S]*?)</$name>')
         .firstMatch(xml);
     if (match == null) return '';
     var value = (match.group(1) ?? '').trim();
