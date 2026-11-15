@@ -1,5 +1,6 @@
 
 import 'package:flutter/material.dart';
+import 'package:url_launcher/url_launcher.dart';
 import 'dart:math';
 
 import 'engine.dart';
@@ -8,6 +9,7 @@ import 'market_hub.dart';
 import 'provider_setup.dart';
 import 'market_symbols.dart';
 import 'trading_controller.dart';
+import 'market_news_service.dart';
 
 // =====================================================
 // AI TRADE PRO
@@ -27,6 +29,10 @@ class _HomeScreenState extends State<HomeScreen> {
   int _selectedTab = 0;
   bool _startingBot = false;
   String? _serviceError;
+  final MarketNewsService _newsService = MarketNewsService();
+  List<MarketNewsItem> _newsItems = [];
+  bool _newsLoading = false;
+  String? _newsError;
 
   @override
   void initState() {
@@ -37,6 +43,7 @@ class _HomeScreenState extends State<HomeScreen> {
     final hub = MarketHub(registry: registry);
 
     _controller = TradingController(marketHub: hub);
+    _loadMarketNews();
   }
 
   @override
@@ -143,6 +150,8 @@ class _HomeScreenState extends State<HomeScreen> {
         const SizedBox(height: 10),
         _scanDiagnosticsCard(),
         const SizedBox(height: 14),
+        _newsCard(),
+        const SizedBox(height: 14),
 
         Row(
           children: [
@@ -246,6 +255,96 @@ class _HomeScreenState extends State<HomeScreen> {
 
         _tradeHistory(limit: 5),
       ],
+    );
+  }
+
+  Future<void> _loadMarketNews() async {
+    if (_newsLoading) return;
+    setState(() {
+      _newsLoading = true;
+      _newsError = null;
+    });
+    try {
+      final items = await _newsService.fetchLatest();
+      if (!mounted) return;
+      setState(() => _newsItems = items);
+    } catch (error) {
+      if (!mounted) return;
+      setState(() => _newsError = 'اخبار دریافت نشد: $error');
+    } finally {
+      if (mounted) setState(() => _newsLoading = false);
+    }
+  }
+
+  Widget _newsCard() {
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(14),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                const Expanded(
+                  child: Text('اخبار و احساسات بازار',
+                      style: TextStyle(fontWeight: FontWeight.bold)),
+                ),
+                IconButton(
+                  onPressed: _newsLoading ? null : _loadMarketNews,
+                  icon: _newsLoading
+                      ? const SizedBox(
+                          width: 18, height: 18,
+                          child: CircularProgressIndicator(strokeWidth: 2))
+                      : const Icon(Icons.refresh),
+                  tooltip: 'به‌روزرسانی اخبار',
+                ),
+              ],
+            ),
+            const Text(
+              'گردآوری خبرهای رمزارز، فارکس و بازارهای جهانی؛ تحلیل احساسات تیترها صرفاً کمکی است.',
+              style: TextStyle(fontSize: 11, color: Colors.white70),
+            ),
+            if (_newsError != null) ...[
+              const SizedBox(height: 8),
+              Text(_newsError!,
+                  style: const TextStyle(color: Colors.orangeAccent, fontSize: 12)),
+            ],
+            if (_newsItems.isEmpty && !_newsLoading && _newsError == null)
+              const Padding(
+                padding: EdgeInsets.symmetric(vertical: 12),
+                child: Text('در انتظار دریافت خبرها...'),
+              ),
+            ..._newsItems.take(8).map((item) {
+              final sentimentColor = item.sentiment > 0
+                  ? Colors.greenAccent
+                  : item.sentiment < 0
+                      ? Colors.redAccent
+                      : Colors.white70;
+              final sentimentLabel = item.sentiment > 0
+                  ? 'مثبت'
+                  : item.sentiment < 0
+                      ? 'منفی'
+                      : 'خنثی';
+              return ListTile(
+                contentPadding: EdgeInsets.zero,
+                dense: true,
+                title: Text(item.title, maxLines: 3,
+                    overflow: TextOverflow.ellipsis),
+                subtitle: Text(
+                  '${item.source} • $sentimentLabel'
+                  '${item.publishedAt == null ? '' : ' • ${item.publishedAt!.toLocal()}'}',
+                  style: TextStyle(color: sentimentColor, fontSize: 11),
+                ),
+                trailing: const Icon(Icons.open_in_new, size: 16),
+                onTap: () => launchUrl(
+                  Uri.parse(item.link),
+                  mode: LaunchMode.externalApplication,
+                ),
+              );
+            }),
+          ],
+        ),
+      ),
     );
   }
 
