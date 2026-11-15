@@ -251,6 +251,7 @@ class TradingController extends ChangeNotifier {
 
         _lastQuotes[result.key] = quote;
         _lastPrices[result.key] = quote.midPrice;
+        _manageOpenPosition(result.key, quote);
 
         if (result.key == symbol.toUpperCase()) {
           selectedQuote = quote;
@@ -442,7 +443,9 @@ class TradingController extends ChangeNotifier {
           equity: equityNow, entryPrice: entry,
           stopPrice: entry * 0.98, confidence: signal.confidence);
         if (quantity > 0 && portfolio.buy(
-          symbol: marketSymbol, price: entry, quantity: quantity)) {
+          symbol: marketSymbol, price: entry, quantity: quantity,
+          allocatedUsdt: min(10.0, quantity * entry),
+          stopLossPercent: 0.02, takeProfitPercent: 0.10)) {
           executedBuyCount++;
           _lastTradeActionBySymbol[marketSymbol] = actionKey;
           lastScanReason = 'خرید آزمایشی $marketSymbol ثبت شد';
@@ -459,7 +462,7 @@ class TradingController extends ChangeNotifier {
           return;
         }
         if (portfolio.sell(symbol: marketSymbol, price: quote.bid,
-            quantity: position.quantity)) {
+            quantity: position.quantity, exitReason: 'خروج با سیگنال')) {
           executedSellCount++;
           _lastTradeActionBySymbol[marketSymbol] = actionKey;
           lastScanReason = 'فروش آزمایشی $marketSymbol ثبت شد';
@@ -468,6 +471,36 @@ class TradingController extends ChangeNotifier {
       }
     } catch (_) {
       // An unavailable pair does not interrupt scanning other symbols.
+    }
+  }
+
+  void _manageOpenPosition(String marketSymbol, MarketQuote quote) {
+    final position = portfolio.positions[marketSymbol];
+    if (position == null || !quote.isValid) return;
+    final price = quote.bid;
+    if (price <= 0 || !price.isFinite) return;
+    if (price > position.highestPrice) position.highestPrice = price;
+
+    // پس از ۳٪ رشد، حد ضرر متحرک ۱٫۵٪ پایین‌تر از اوج قیمت قرار می‌گیرد.
+    if (position.highestPrice >= position.averageEntryPrice * 1.03) {
+      final candidate = position.highestPrice * 0.985;
+      if (candidate > position.trailingStop) position.trailingStop = candidate;
+    }
+    final effectiveStop = max(position.stopPrice, position.trailingStop);
+    if (price >= position.targetPrice) {
+      portfolio.sell(symbol: marketSymbol, price: price,
+        quantity: position.quantity, exitReason: 'رسیدن به هدف سود ۱۰٪');
+      lastScanReason = '$marketSymbol: هدف سود ۱۰٪ محقق شد';
+      status = lastScanReason;
+      notifyListeners();
+    } else if (price <= effectiveStop) {
+      final reason = position.trailingStop > position.stopPrice
+          ? 'فعال شدن حد ضرر متحرک' : 'فعال شدن حد ضرر ۲٪';
+      portfolio.sell(symbol: marketSymbol, price: price,
+        quantity: position.quantity, exitReason: reason);
+      lastScanReason = '$marketSymbol: $reason';
+      status = lastScanReason;
+      notifyListeners();
     }
   }
 
@@ -555,6 +588,9 @@ class TradingController extends ChangeNotifier {
       symbol: symbol,
       price: price,
       quantity: quantity,
+      allocatedUsdt: min(10.0, quantity * price),
+      stopLossPercent: 0.02,
+      takeProfitPercent: 0.10,
     );
 
     status = success
@@ -586,6 +622,7 @@ class TradingController extends ChangeNotifier {
       symbol: symbol,
       price: price,
       quantity: position.quantity,
+      exitReason: 'خروج با سیگنال',
     );
 
     status = success
