@@ -267,6 +267,11 @@ class _HomeScreenState extends State<HomeScreen> {
     try {
       final items = await _newsService.fetchLatest();
       if (!mounted) return;
+      final newsScore = items.fold<int>(
+        0,
+        (sum, item) => sum + item.sentiment,
+      );
+      _controller.updateMarketNewsSentiment(newsScore.sign);
       setState(() => _newsItems = items);
     } catch (error) {
       if (!mounted) return;
