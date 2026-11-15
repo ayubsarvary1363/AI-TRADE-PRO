@@ -244,16 +244,11 @@ class RiskManager {
       return 0;
     }
 
-    final riskAmount = equity * riskPerTrade;
-    final riskPerUnit = entryPrice - stopPrice;
-
     final confidenceFactor = confidence.clamp(0.0, 1.0);
-    final quantity = (riskAmount / riskPerUnit) * confidenceFactor;
-
-    // سقف ارزش معامله: ۲۵ درصد موجودی
-    final maximumQuantity = (equity * 0.25) / entryPrice;
-
-    return min(quantity, maximumQuantity).toDouble();
+    // تخصیص متناسب با قدرت سیگنال و حداکثر ۱۰ USDT برای هر معامله.
+    final allocation = min(10.0, max(2.0, 10.0 * confidenceFactor));
+    final affordableAllocation = min(allocation, equity * 0.95);
+    return (affordableAllocation / entryPrice).toDouble();
   }
 
   bool canTrade({
@@ -282,11 +277,23 @@ class PaperPosition {
   final String symbol;
   double quantity;
   double averageEntryPrice;
+  final double allocatedUsdt;
+  final DateTime openedAt;
+  double stopPrice;
+  final double targetPrice;
+  double highestPrice;
+  double trailingStop;
 
   PaperPosition({
     required this.symbol,
     required this.quantity,
     required this.averageEntryPrice,
+    required this.allocatedUsdt,
+    required this.openedAt,
+    required this.stopPrice,
+    required this.targetPrice,
+    required this.highestPrice,
+    this.trailingStop = 0,
   });
 
   double marketValue(double price) => quantity * price;
@@ -306,6 +313,11 @@ class PaperFill {
   final double fee;
   final double realizedPnl;
   final DateTime time;
+  final double? entryPrice;
+  final double? allocatedUsdt;
+  final String? exitReason;
+  final DateTime? openedAt;
+  final Duration? holdingDuration;
 
   const PaperFill({
     required this.id,
@@ -316,6 +328,11 @@ class PaperFill {
     required this.fee,
     required this.realizedPnl,
     required this.time,
+    this.entryPrice,
+    this.allocatedUsdt,
+    this.exitReason,
+    this.openedAt,
+    this.holdingDuration,
   });
 }
 
@@ -396,6 +413,9 @@ class PaperPortfolio {
     required String symbol,
     required double price,
     required double quantity,
+    double? allocatedUsdt,
+    double stopLossPercent = 0.02,
+    double takeProfitPercent = 0.10,
   }) {
     if (symbol.isEmpty ||
         price <= 0 ||
@@ -416,10 +436,16 @@ class PaperPortfolio {
     final existing = positions[symbol];
 
     if (existing == null) {
+      final effectiveEntry = (cost + fee) / quantity;
       positions[symbol] = PaperPosition(
         symbol: symbol,
         quantity: quantity,
-        averageEntryPrice: (cost + fee) / quantity,
+        averageEntryPrice: effectiveEntry,
+        allocatedUsdt: allocatedUsdt ?? total,
+        openedAt: DateTime.now(),
+        stopPrice: effectiveEntry * (1 - stopLossPercent),
+        targetPrice: effectiveEntry * (1 + takeProfitPercent),
+        highestPrice: effectiveEntry,
       );
     } else {
       final newQuantity = existing.quantity + quantity;
@@ -447,6 +473,7 @@ class PaperPortfolio {
     required String symbol,
     required double price,
     required double quantity,
+    String exitReason = 'خروج با سیگنال',
   }) {
     if (symbol.isEmpty ||
         price <= 0 ||
@@ -485,6 +512,11 @@ class PaperPortfolio {
       fee: fee,
       realizedPnl: pnl,
       time: DateTime.now(),
+      entryPrice: position.averageEntryPrice,
+      allocatedUsdt: position.allocatedUsdt,
+      exitReason: exitReason,
+      openedAt: position.openedAt,
+      holdingDuration: DateTime.now().difference(position.openedAt),
     ));
 
     return true;
