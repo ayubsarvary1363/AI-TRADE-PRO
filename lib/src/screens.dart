@@ -269,7 +269,7 @@ class _HomeScreenState extends State<HomeScreen> {
       if (!mounted) return;
       final newsScore = items.fold<int>(
         0,
-        (sum, item) => sum + item.sentiment,
+        (sum, item) => sum + (item.sentiment * item.importance),
       );
       _controller.updateMarketNewsSentiment(newsScore.sign);
       setState(() => _newsItems = items);
@@ -306,7 +306,7 @@ class _HomeScreenState extends State<HomeScreen> {
               ],
             ),
             const Text(
-              'گردآوری خبرهای رمزارز، فارکس و بازارهای جهانی؛ تحلیل احساسات تیترها صرفاً کمکی است.',
+              'پوشش چندموضوعی رمزارز، فارکس، بانک‌های مرکزی، تورم و گزارش اشتغال؛ امتیاز اهمیت و اثر خبر تخمینی است.',
               style: TextStyle(fontSize: 11, color: Colors.white70),
             ),
             if (_newsError != null) ...[
