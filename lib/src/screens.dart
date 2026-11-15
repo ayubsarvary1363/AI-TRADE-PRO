@@ -648,8 +648,41 @@ class _HomeScreenState extends State<HomeScreen> {
                   Text('علت خروج: ${fill.exitReason}'),
                 if (fill.holdingDuration != null)
                   Text('مدت معامله: ${fill.holdingDuration!.inMinutes} دقیقه'),
-                if (!isBuy)
-                  Text('سود/زیان تحقق‌یافته: ${fill.realizedPnl.toStringAsFixed(4)} USDT'),
+                if (!isBuy) ...[
+                  Builder(
+                    builder: (context) {
+                      final pnl = fill.realizedPnl;
+                      final basis = (fill.entryPrice ?? 0) * fill.quantity;
+                      final pnlPercent = basis > 0 ? (pnl / basis) * 100 : 0.0;
+                      final pnlColor = pnl >= 0
+                          ? Colors.greenAccent
+                          : Colors.redAccent;
+                      return Padding(
+                        padding: const EdgeInsets.only(top: 4, bottom: 4),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              pnl >= 0 ? 'سود نهایی معامله' : 'زیان نهایی معامله',
+                              style: TextStyle(
+                                color: pnlColor,
+                                fontWeight: FontWeight.bold,
+                              ),
+                            ),
+                            Text(
+                              '${pnl >= 0 ? '+' : ''}${pnl.toStringAsFixed(4)} USDT  (${pnlPercent.toStringAsFixed(2)}٪)',
+                              style: TextStyle(
+                                color: pnlColor,
+                                fontSize: 16,
+                                fontWeight: FontWeight.bold,
+                              ),
+                            ),
+                          ],
+                        ),
+                      );
+                    },
+                  ),
+                ],
                 const SizedBox(height: 4),
                 Text(
                   currentPrice == null
@@ -768,6 +801,14 @@ class _HomeScreenState extends State<HomeScreen> {
         Card(
           child: Column(
             children: const [
+              ListTile(
+                title: Text('حد ضرر هر معامله'),
+                trailing: Text('۱٪'),
+              ),
+              ListTile(
+                title: Text('حد سود هر معامله'),
+                trailing: Text('۵٪'),
+              ),
               ListTile(
                 title: Text('ریسک پایه هر معامله'),
                 trailing: Text('۰٫۵٪'),
