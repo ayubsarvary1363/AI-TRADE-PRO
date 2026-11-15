@@ -19,7 +19,7 @@ class TradingController extends ChangeNotifier {
   final MarketHub marketHub;
 
   final PaperPortfolio portfolio = PaperPortfolio(
-    initialUsdt: 50,
+    initialUsdt: 100,
   );
 
   final RiskManager riskManager = RiskManager();
