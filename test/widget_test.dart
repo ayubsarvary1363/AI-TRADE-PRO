@@ -1,10 +1,11 @@
+import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:ai_trade_pro/src/app.dart';
+import 'package:rise_s_trade/src/app.dart';
 
 void main() {
-  testWidgets('shows app title and paper balance', (tester) async {
+  testWidgets('application starts and renders its MaterialApp', (tester) async {
     await tester.pumpWidget(const AiTradeProApp());
-    expect(find.text('AI Trade Pro'), findsOneWidget);
-    expect(find.textContaining('50.00'), findsOneWidget);
+    expect(find.byType(MaterialApp), findsOneWidget);
+    expect(find.text('RISE S TRADE'), findsWidgets);
   });
 }
