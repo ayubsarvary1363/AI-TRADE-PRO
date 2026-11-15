@@ -1,5 +1,4 @@
 import 'package:flutter/material.dart';
-import 'bsc_network.dart';
 import 'bsc_wallet_vault.dart';
 
 class BscWalletScreen extends StatefulWidget {
