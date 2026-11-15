@@ -567,7 +567,10 @@ class _HomeScreenState extends State<HomeScreen> {
     return ListView(
       padding: const EdgeInsets.all(16),
       children: [
-        _sectionTitle('تاریخچه معاملات آزمایشی'),
+        _sectionTitle('معاملات باز و سود/زیان لحظه‌ای'),
+        _openPositions(),
+        const SizedBox(height: 16),
+        _sectionTitle('تاریخچه معاملات بسته‌شده'),
         _tradeHistory(),
         const SizedBox(height: 20),
         Card(
@@ -598,6 +601,67 @@ class _HomeScreenState extends State<HomeScreen> {
           ),
         ),
       ],
+    );
+  }
+
+  Widget _openPositions() {
+    final positions = _controller.portfolio.positions.values.toList();
+    if (positions.isEmpty) {
+      return const Card(
+        child: Padding(
+          padding: EdgeInsets.all(16),
+          child: Text('در حال حاضر معامله بازی وجود ندارد'),
+        ),
+      );
+    }
+    return Column(
+      children: positions.map((position) {
+        final price = _controller.priceFor(position.symbol);
+        final pnl = price == null ? null : position.unrealizedPnl(price);
+        final effectiveStop = position.trailingStop > position.stopPrice
+            ? position.trailingStop : position.stopPrice;
+        final color = pnl == null ? Colors.orangeAccent
+            : pnl >= 0 ? Colors.greenAccent : Colors.redAccent;
+        return Card(
+          child: Padding(
+            padding: const EdgeInsets.all(14),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    Text(position.symbol,
+                        style: const TextStyle(fontWeight: FontWeight.bold)),
+                    const Chip(label: Text('باز')),
+                  ],
+                ),
+                _summaryRow('نقطه ورود',
+                    '${position.averageEntryPrice.toStringAsFixed(6)} USDT'),
+                _summaryRow('قیمت فعلی',
+                    price == null ? 'قیمت زنده در دسترس نیست'
+                        : '${price.toStringAsFixed(6)} USDT'),
+                _summaryRow('تارگت',
+                    '${position.targetPrice.toStringAsFixed(6)} USDT'),
+                _summaryRow('حد ضرر',
+                    '${effectiveStop.toStringAsFixed(6)} USDT'),
+                _summaryRow('حجم معامله',
+                    '${position.quantity.toStringAsFixed(6)}'),
+                _summaryRow('سود/زیان لحظه‌ای',
+                    pnl == null ? '—' : '${pnl >= 0 ? '+' : ''}${pnl.toStringAsFixed(4)} USDT'),
+                if (pnl != null)
+                  Align(
+                    alignment: Alignment.centerLeft,
+                    child: Text(
+                      'بازده: ${(pnl / (position.averageEntryPrice * position.quantity) * 100).toStringAsFixed(2)}٪',
+                      style: TextStyle(color: color, fontWeight: FontWeight.bold),
+                    ),
+                  ),
+              ],
+            ),
+          ),
+        );
+      }).toList(),
     );
   }
 
@@ -641,7 +705,11 @@ class _HomeScreenState extends State<HomeScreen> {
                   '${fill.time.toLocal()}',
                 ),
                 if (fill.entryPrice != null)
-                  Text('قیمت ورود: ${fill.entryPrice!.toStringAsFixed(6)}'),
+                  Text('قیمت ورود: ${fill.entryPrice!.toStringAsFixed(6)} USDT'),
+                if (fill.targetPrice != null)
+                  Text('تارگت: ${fill.targetPrice!.toStringAsFixed(6)} USDT'),
+                if (fill.stopPrice != null)
+                  Text('حد ضرر: ${fill.stopPrice!.toStringAsFixed(6)} USDT'),
                 if (fill.allocatedUsdt != null)
                   Text('مبلغ تخصیص‌یافته: ${fill.allocatedUsdt!.toStringAsFixed(2)} USDT'),
                 if (fill.exitReason != null)
@@ -649,7 +717,9 @@ class _HomeScreenState extends State<HomeScreen> {
                 if (fill.holdingDuration != null)
                   Text('مدت معامله: ${fill.holdingDuration!.inMinutes} دقیقه'),
                 if (!isBuy)
-                  Text('سود/زیان تحقق‌یافته: ${fill.realizedPnl.toStringAsFixed(4)} USDT'),
+                  Text('سود/زیان نهایی: ${fill.realizedPnl >= 0 ? '+' : ''}${fill.realizedPnl.toStringAsFixed(4)} USDT'),
+                if (!isBuy)
+                  Text('قیمت خروج: ${fill.price.toStringAsFixed(6)} USDT'),
                 const SizedBox(height: 4),
                 Text(
                   currentPrice == null
