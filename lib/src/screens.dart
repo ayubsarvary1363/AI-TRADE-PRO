@@ -571,7 +571,7 @@ class _HomeScreenState extends State<HomeScreen> {
         _openPositions(),
         const SizedBox(height: 16),
         _sectionTitle('تاریخچه معاملات بسته‌شده'),
-        _tradeHistory(),
+        _tradeHistory(closedOnly: true),
         const SizedBox(height: 20),
         Card(
           child: Padding(
@@ -665,8 +665,10 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
-  Widget _tradeHistory({int? limit}) {
-    final allFills = _controller.portfolio.fills.reversed.toList();
+  Widget _tradeHistory({int? limit, bool closedOnly = false}) {
+    final allFills = _controller.portfolio.fills.reversed
+        .where((fill) => !closedOnly || fill.side == SignalDirection.sell)
+        .toList();
 
     final fills = limit == null
         ? allFills
