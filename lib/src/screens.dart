@@ -409,6 +409,8 @@ class _HomeScreenState extends State<HomeScreen> {
                         fills: _controller.portfolio.fills
                             .where((fill) => fill.symbol == _controller.symbol)
                             .toList(),
+                        currentPrices: _controller.currentPrices,
+                        openPositions: _controller.portfolio.positions,
                       ),
                       child: const SizedBox.expand(),
                     ),
@@ -774,7 +776,7 @@ class _HomeScreenState extends State<HomeScreen> {
               ),
               ListTile(
                 title: Text('حد ضرر روزانه'),
-                trailing: Text('۱٪'),
+                trailing: Text('۵٪'),
               ),
               ListTile(
                 title: Text('حداکثر افت سرمایه'),
@@ -854,10 +856,14 @@ class _Legend extends StatelessWidget {
 class TradingChartPainter extends CustomPainter {
   final List<Candle> candles;
   final List<PaperFill> fills;
+  final Map<String, double> currentPrices;
+  final Map<String, PaperPosition> openPositions;
 
   TradingChartPainter({
     required this.candles,
     required this.fills,
+    required this.currentPrices,
+    required this.openPositions,
   });
 
   @override
@@ -1000,6 +1006,45 @@ class TradingChartPainter extends CustomPainter {
         canvas,
         Offset(point.dx + 6, point.dy - 12),
       );
+
+      // نمایش سود/زیان کنار همان نشانگر معامله، بدون تغییر چیدمان نمودار.
+      double? pnl;
+      if (isBuy) {
+        final position = openPositions[fill.symbol];
+        final livePrice = currentPrices[fill.symbol];
+        if (position != null && livePrice != null && livePrice > 0) {
+          pnl = position.unrealizedPnl(livePrice);
+        } else {
+          for (final exit in fills) {
+            if (exit.symbol == fill.symbol &&
+                exit.side == SignalDirection.sell &&
+                !exit.time.isBefore(fill.time)) {
+              pnl = exit.realizedPnl;
+              break;
+            }
+          }
+        }
+      } else {
+        pnl = fill.realizedPnl;
+      }
+
+      if (pnl != null) {
+        final pnlText = '${pnl >= 0 ? '+' : ''}${pnl.toStringAsFixed(3)} USDT';
+        final pnlPainter = TextPainter(
+          text: TextSpan(
+            text: pnlText,
+            style: TextStyle(
+              color: pnl >= 0 ? Colors.greenAccent : Colors.redAccent,
+              fontSize: 10,
+              fontWeight: FontWeight.bold,
+            ),
+          ),
+          textDirection: TextDirection.ltr,
+        )..layout(maxWidth: 110);
+        final labelX = (point.dx + 7).clamp(0.0, size.width - pnlPainter.width);
+        final labelY = (point.dy + 8).clamp(0.0, size.height - pnlPainter.height);
+        pnlPainter.paint(canvas, Offset(labelX, labelY));
+      }
     }
   }
 

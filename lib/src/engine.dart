@@ -226,7 +226,7 @@ class RiskManager {
 
   RiskManager({
     this.riskPerTrade = 0.005,
-    this.maxDailyLoss = 0.01,
+    this.maxDailyLoss = 0.05,
     this.maxDrawdown = 0.05,
   });
 
