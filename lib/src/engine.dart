@@ -318,9 +318,9 @@ class SignalEngine {
     }
 
     final threshold = switch (style) {
-      TradingStyle.fast => 2,
-      TradingStyle.mediumTerm => 3,
-      TradingStyle.longTerm => 4,
+      TradingStyle.fast => 4,
+      TradingStyle.mediumTerm => 5,
+      TradingStyle.longTerm => 6,
     };
 
     SignalDirection direction = SignalDirection.hold;
@@ -373,10 +373,16 @@ class RiskManager {
     }
 
     final confidenceFactor = confidence.clamp(0.0, 1.0);
-    // تخصیص متناسب با قدرت سیگنال و حداکثر ۱۰ USDT برای هر معامله.
-    final allocation = min(10.0, max(2.0, 10.0 * confidenceFactor));
-    final affordableAllocation = min(allocation, equity * 0.95);
-    return (affordableAllocation / entryPrice).toDouble();
+    final stopDistance = entryPrice - stopPrice;
+    if (stopDistance <= 0) return 0;
+
+    // حجم بر اساس بودجه ریسک واقعی محاسبه می‌شود، نه صرفاً اعتماد سیگنال.
+    // ریسک پایه ۰٫۵٪ از سرمایه است و سقف ارزش هر موقعیت ۱۰ USDT باقی می‌ماند.
+    final riskBudget = equity * riskPerTrade * confidenceFactor;
+    final riskBasedQuantity = riskBudget / stopDistance;
+    final maxNotional = min(10.0, equity * 0.95);
+    final cappedQuantity = min(riskBasedQuantity, maxNotional / entryPrice);
+    return max(0.0, cappedQuantity).toDouble();
   }
 
   bool canTrade({
