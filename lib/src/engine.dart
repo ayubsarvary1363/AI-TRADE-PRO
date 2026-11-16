@@ -11,7 +11,7 @@ import 'dart:math';
 enum TradeMode { paper, live }
 
 const double defaultStopLossPercent = 0.01;
-const double defaultTakeProfitPercent = 0.05;
+const double defaultTakeProfitPercent = 0.08;
 
 enum SignalDirection { buy, sell, hold }
 

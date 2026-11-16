@@ -557,15 +557,15 @@ class TradingController extends ChangeNotifier {
     if (price <= 0 || !price.isFinite) return;
     if (price > position.highestPrice) position.highestPrice = price;
 
-    // خروج خودکار با حد ضرر ثابت ۱٪ یا حد سود ثابت ۵٪.
+    // خروج خودکار با حد ضرر ثابت ۱٪ یا حد سود ثابت ۸٪.
     if (price >= position.targetPrice) {
       portfolio.sell(
         symbol: marketSymbol,
         price: price,
         quantity: position.quantity,
-        exitReason: 'رسیدن به حد سود ۵٪',
+        exitReason: 'رسیدن به حد سود ۸٪',
       );
-      lastScanReason = '$marketSymbol: حد سود ۵٪ فعال شد';
+      lastScanReason = '$marketSymbol: حد سود ۸٪ فعال شد';
       status = lastScanReason;
       unawaited(_persistTradeHistory());
       notifyListeners();
