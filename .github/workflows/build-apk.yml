@@ -7,6 +7,7 @@ on:
       - main
       - rise-s-trade-recovered
       - ai-trade-pro-v2-risk-analytics
+      - fix/trade-entry-exit-risk-v2
 
 permissions:
   contents: read
