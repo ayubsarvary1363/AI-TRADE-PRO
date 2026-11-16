@@ -913,7 +913,7 @@ class _HomeScreenState extends State<HomeScreen> {
               ),
               ListTile(
                 title: Text('حد سود هر معامله'),
-                trailing: Text('۵٪'),
+                trailing: Text('۸٪'),
               ),
               ListTile(
                 title: Text('ریسک پایه هر معامله'),
