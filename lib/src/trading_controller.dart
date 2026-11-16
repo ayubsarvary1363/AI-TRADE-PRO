@@ -530,20 +530,9 @@ class TradingController extends ChangeNotifier {
           lastScanReason = '$marketSymbol: حجم معامله یا موجودی کافی نیست';
         }
       } else if (signal.direction == SignalDirection.sell) {
-        final position = portfolio.positions[marketSymbol];
-        if (position == null) {
-          skippedPositionCount++;
-          lastScanReason = '$marketSymbol: موقعیت بازی برای فروش وجود ندارد';
-          return;
-        }
-        if (portfolio.sell(symbol: marketSymbol, price: quote.bid,
-            quantity: position.quantity, exitReason: 'خروج با سیگنال')) {
-          executedSellCount++;
-          _lastTradeActionBySymbol[marketSymbol] = actionKey;
-          lastScanReason = 'فروش آزمایشی $marketSymbol ثبت شد';
-          status = lastScanReason;
-          unawaited(_persistTradeHistory());
-        }
+        // سیگنال نزولی به‌تنهایی موقعیت را نمی‌بندد؛ خروج فقط با حد سود/ضرر.
+        skippedPositionCount++;
+        lastScanReason = '$marketSymbol: سیگنال نزولی؛ موقعیت فقط با حد سود یا حد ضرر بسته می‌شود';
       }
     } catch (_) {
       // An unavailable pair does not interrupt scanning other symbols.
@@ -626,9 +615,8 @@ class TradingController extends ChangeNotifier {
 
     if (signal.direction == SignalDirection.buy) {
       _executePaperBuy(signal);
-    } else if (signal.direction == SignalDirection.sell) {
-      _executePaperSell();
     }
+    // سیگنال SELL فقط نشانگر ضعف بازار است؛ حد سود/ضرر مدیریت خروج را انجام می‌دهد.
   }
 
   void _executePaperBuy(TradeSignal signal) {
