@@ -187,9 +187,10 @@ class TradingController extends ChangeNotifier {
 
   int get tradeCount => portfolio.fills.length;
 
-  Map<String, double> get _currentPrices {
-    return Map<String, double>.from(_lastPrices);
-  }
+  Map<String, double> get currentPrices =>
+      Map<String, double>.from(_lastPrices);
+
+  Map<String, double> get _currentPrices => currentPrices;
 
   String get quoteStatus => marketHub.lastQuoteStatus;
 
