@@ -52,8 +52,8 @@ jobs:
           if end < 0:
               raise SystemExit("Android manifest root is malformed")
           permissions = [
-              "    <uses-permission android:name=\\"android.permission.INTERNET\\" />",
-              "    <uses-permission android:name=\\"android.permission.ACCESS_NETWORK_STATE\\" />",
+              "    <uses-permission android:name=\"android.permission.INTERNET\" />",
+              "    <uses-permission android:name=\"android.permission.ACCESS_NETWORK_STATE\" />",
           ]
           for permission in permissions:
               name = permission.split('name="')[1].split('"')[0]
