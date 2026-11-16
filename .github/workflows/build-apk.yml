@@ -58,7 +58,7 @@ jobs:
           for permission in permissions:
               name = permission.split('name="')[1].split('"')[0]
               if name not in content:
-                  content = content[:end + 1] + "\\n" + permission + content[end + 1:]
+                  content = content[:end + 1] + "\n" + permission + content[end + 1:]
                   end += len(permission) + 1
           manifest.write_text(content, encoding="utf-8")
           if "android.permission.INTERNET" not in manifest.read_text(encoding="utf-8"):
